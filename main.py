@@ -1,8 +1,9 @@
 import cv2
 from ultralytics import YOLO
 
-# 1. โหลดโมเดล YOLOv8n
-model = YOLO("yolov8n.pt")
+# เปลี่ยนจาก yolov8n.pt เป็น yolov11n.pt
+model = YOLO("yolov11n.pt")
+
 
 # 2. นำเข้าไฟล์วิดีโอ 
 cap = cv2.VideoCapture("KUSRC_Traffic.mov") 
@@ -46,7 +47,9 @@ while cap.isOpened():
         break
 
     # 3. ตรวจจับและติดตามยานพาหนะ
-    results = model.track(frame, classes=[2, 3, 5, 7], persist=True, tracker="bytetrack.yaml")
+   # เปลี่ยนจาก device=0 เป็น device='cpu' เพื่อไม่ให้โปรแกรม Error
+    results = model.track(frame, classes=[2, 3, 5, 7], persist=True, tracker="bytetrack.yaml", device='cpu')
+
     annotated_frame = results[0].plot()
 
     # 4. วาดเส้นสมมติแยกสีให้เห็นชัดเจนบนหน้าจอ
@@ -93,7 +96,7 @@ while cap.isOpened():
 
     # 6. ย่อขนาดภาพก่อนแสดงผล เพื่อไม่ให้ล้นจอ
     resized_frame = cv2.resize(annotated_frame, (1024, 576)) 
-    cv2.imshow("Smart Traffic Detection - YOLOv8", resized_frame)
+    cv2.imshow("Smart Traffic Detection ", resized_frame)
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
