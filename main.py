@@ -1,8 +1,14 @@
 import cv2
 from ultralytics import YOLO
 
-# เปลี่ยนจาก yolov8n.pt เป็น yolov11n.pt
-model = YOLO("yolov11n.pt")
+# เลือกรุ่นของโมเดลที่ต้องการทดสอบ (YOLO Model Configuration)
+# สามารถเลือกใช้ได้ทั้ง YOLOv11 (แนะนำ) หรือเปลี่ยนเป็น YOLOv8 ได้ตามต้องการ
+# YOLOv11: "yolov11n.pt", "yolov11s.pt", "yolov11m.pt"
+# YOLOv8: "yolov8n.pt", "yolov8s.pt", "yolov8m.pt"
+MODEL_PATH = "yolov11n.pt"  # เปลี่ยนเป็น "yolov8n.pt" เพื่อทดสอบรุ่น YOLOv8
+IMG_SIZE = 1280             # ขนาดความละเอียดในตรวจจับ (640 = มาตรฐาน/เร็ว, 1280 = แม่นยำวัตถุขนาดเล็กแต่ช้าลง)
+
+model = YOLO(MODEL_PATH)
 
 
 # 2. นำเข้าไฟล์วิดีโอ 
@@ -48,7 +54,7 @@ while cap.isOpened():
 
     # 3. ตรวจจับและติดตามยานพาหนะ
    # เปลี่ยนจาก device=0 เป็น device='cpu' เพื่อไม่ให้โปรแกรม Error
-    results = model.track(frame, classes=[2, 3, 5, 7], persist=True, tracker="bytetrack.yaml", device='cpu')
+    results = model.track(frame, imgsz=IMG_SIZE, classes=[2, 3, 5, 7], persist=True, tracker="bytetrack.yaml", device='cpu')
 
     annotated_frame = results[0].plot()
 

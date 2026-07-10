@@ -41,7 +41,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🚗 Kasetsart University Sriracha Campus</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Real-time Vehicle Detection, Tracking & Counting Dashboard (YOLOv11)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Real-time Vehicle Detection, Tracking & Counting Dashboard (YOLOv11 / YOLOv8)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Sidebar Panel Configuration
@@ -72,12 +72,27 @@ else:
 
 # 2. Model Parameters
 st.sidebar.subheader("2. Model Configuration")
-model_size = st.sidebar.selectbox(
-    "YOLOv11 Model Version:",
-    ["yolov11n.pt", "yolov11s.pt", "yolov11m.pt"],
+model_version = st.sidebar.selectbox(
+    "YOLO Architecture Version:",
+    ["YOLOv11 (Newest)", "YOLOv8"],
     index=0,
-    help="Nano (fastest), Small (balanced), Medium (highest accuracy but slower)."
+    help="Choose between YOLOv11 (newer, more optimized) and YOLOv8."
 )
+
+if model_version == "YOLOv11 (Newest)":
+    model_size = st.sidebar.selectbox(
+        "YOLOv11 Model Size:",
+        ["yolov11n.pt", "yolov11s.pt", "yolov11m.pt", "yolov11l.pt", "yolov11x.pt"],
+        index=0,
+        help="n: Nano (fastest), s: Small, m: Medium, l: Large, x: Extra-Large"
+    )
+else:
+    model_size = st.sidebar.selectbox(
+        "YOLOv8 Model Size:",
+        ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"],
+        index=0,
+        help="n: Nano (fastest), s: Small, m: Medium, l: Large, x: Extra-Large"
+    )
 
 conf_threshold = st.sidebar.slider(
     "Model Confidence Threshold:",
@@ -103,6 +118,13 @@ frame_skip = st.sidebar.slider(
     "Frame Skip Rate:",
     min_value=1, max_value=10, value=2, step=1,
     help="Processes every N-th frame. 1 processes all frames (slowest). Increase for CPU speedups."
+)
+
+img_size = st.sidebar.selectbox(
+    "Inference Resolution (Image Size):",
+    [640, 1280],
+    index=0,
+    help="640 is standard/fast. 1280 improves detection of small/distant vehicles but runs slower."
 )
 
 # 4. Calibration Section
@@ -173,17 +195,18 @@ if "track_history" not in st.session_state:
 
 # Load model
 model = None
+fallback_model = "yolov11n.pt" if "yolov11" in model_size else "yolov8n.pt"
 try:
     model = load_yolo_model(model_size)
 except Exception as e:
-    st.sidebar.warning(f"⚠️ Could not load '{model_size}'. Falling back to local 'yolov11n.pt'.")
+    st.sidebar.warning(f"⚠️ Could not load '{model_size}'. Falling back to local '{fallback_model}'.")
     try:
-        model = load_yolo_model("yolov11n.pt")
+        model = load_yolo_model(fallback_model)
     except Exception as e2:
-        st.sidebar.error(f"❌ Critical Error: Failed to load fallback model 'yolov11n.pt'.")
+        st.sidebar.error(f"❌ Critical Error: Failed to load fallback model '{fallback_model}'.")
 
 if model is None:
-    st.error("Failed to load any YOLOv11 model. Please ensure 'yolov11n.pt' is present in the project directory.")
+    st.error(f"Failed to load any YOLO model. Please ensure '{fallback_model}' is present in the project directory.")
     st.stop()
 
 # ---------------------------------------------------------
@@ -319,6 +342,7 @@ if video_path is not None:
                 # YOLO tracking pipeline
                 results = model.track(
                     frame,
+                    imgsz=img_size,
                     classes=selected_class_ids,
                     persist=True,
                     tracker="bytetrack.yaml",
