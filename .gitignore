@@ -1,0 +1,22 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large video files (GitHub limits files to 100MB)
+*.MOV
+*.mov
+*.mp4
+*.avi
+
+# YOLO weights (avoid pushing large weights, they will download automatically)
+*.pt
+
+# Streamlit local settings
+.streamlit/
+! .streamlit/config.toml
+
+# Virtual environment
+venv/
+.venv/
+env/
