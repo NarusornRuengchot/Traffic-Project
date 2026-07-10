@@ -4,3 +4,4 @@ ultralytics
 pandas
 torch
 torchvision
+lapx
