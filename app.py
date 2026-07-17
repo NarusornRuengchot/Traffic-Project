@@ -146,10 +146,38 @@ class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
 coco_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
 selected_class_ids = [class_map[c] for c in target_classes]
 
+def resolve_model_path(model_name):
+    # Check if the file exists exactly as named
+    if os.path.exists(model_name):
+        return model_name
+        
+    # Check alternatives for YOLOv11 (with/without 'v' inside the name)
+    if "yolov11" in model_name:
+        alt_name = model_name.replace("yolov11", "yolo11")
+        if os.path.exists(alt_name):
+            return alt_name
+    elif "yolo11" in model_name:
+        alt_name = model_name.replace("yolo11", "yolov11")
+        if os.path.exists(alt_name):
+            return alt_name
+            
+    # Check alternatives for YOLOv8 (with/without 'v')
+    if "yolov8" in model_name:
+        alt_name = model_name.replace("yolov8", "yolo8")
+        if os.path.exists(alt_name):
+            return alt_name
+    elif "yolo8" in model_name:
+        alt_name = model_name.replace("yolo8", "yolov8")
+        if os.path.exists(alt_name):
+            return alt_name
+            
+    return model_name
+
 # Persistent initialization of the model
 @st.cache_resource
 def load_yolo_model(model_name):
-    return YOLO(model_name)
+    resolved_name = resolve_model_path(model_name)
+    return YOLO(resolved_name)
 
 # Cache video metadata and the first frame for calibration preview
 @st.cache_data
@@ -195,7 +223,7 @@ if "track_history" not in st.session_state:
 
 # Load model
 model = None
-fallback_model = "yolov11n.pt" if "yolov11" in model_size else "yolov8n.pt"
+fallback_model = "yolov11n.pt" if ("yolov11" in model_size or "yolo11" in model_size) else "yolov8n.pt"
 try:
     model = load_yolo_model(model_size)
 except Exception as e:
@@ -345,7 +373,7 @@ if video_path is not None:
                     imgsz=img_size,
                     classes=selected_class_ids,
                     persist=True,
-                    tracker="bytetrack.yaml",
+                    tracker="custom_tracker.yaml",
                     device=device,
                     conf=conf_threshold,
                     verbose=False

@@ -1,11 +1,39 @@
 import cv2
+import os
 from ultralytics import YOLO
+
+# ฟังก์ชันตรวจสอบชื่อไฟล์โมเดลเพื่อป้องกันข้อผิดพลาดกรณีพิมพ์ชื่อไฟล์สลับไปมาระหว่าง yolo11 และ yolov11
+def resolve_model_path(model_path):
+    if os.path.exists(model_path):
+        return model_path
+    
+    # กรณี YOLOv11 (สลับระหว่างมี v และไม่มี v เช่น yolov11s.pt <-> yolo11s.pt)
+    if "yolov11" in model_path:
+        alt_path = model_path.replace("yolov11", "yolo11")
+        if os.path.exists(alt_path):
+            return alt_path
+    elif "yolo11" in model_path:
+        alt_path = model_path.replace("yolo11", "yolov11")
+        if os.path.exists(alt_path):
+            return alt_path
+            
+    # กรณี YOLOv8 (สลับระหว่างมี v และไม่มี v เช่น yolov8n.pt <-> yolo8n.pt)
+    if "yolov8" in model_path:
+        alt_path = model_path.replace("yolov8", "yolo8")
+        if os.path.exists(alt_path):
+            return alt_path
+    elif "yolo8" in model_path:
+        alt_path = model_path.replace("yolo8", "yolov8")
+        if os.path.exists(alt_path):
+            return alt_path
+            
+    return model_path
 
 # เลือกรุ่นของโมเดลที่ต้องการทดสอบ (YOLO Model Configuration)
 # สามารถเลือกใช้ได้ทั้ง YOLOv11 (แนะนำ) หรือเปลี่ยนเป็น YOLOv8 ได้ตามต้องการ
-# YOLOv11: "yolov11n.pt", "yolov11s.pt", "yolov11m.pt"
-# YOLOv8: "yolov8n.pt", "yolov8s.pt", "yolov8m.pt"
-MODEL_PATH = "yolov11n.pt"  # เปลี่ยนเป็น "yolov8n.pt" เพื่อทดสอบรุ่น YOLOv8
+# ตัวอย่างโมเดล YOLOv11 ที่มีในโฟลเดอร์: "yolov11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt"
+# ตัวอย่างโมเดล YOLOv8 ที่มีในโฟลเดอร์: "yolov8n.pt"
+MODEL_PATH = resolve_model_path("yolov11n.pt")  # ระบบจะตรวจสอบและดึงไฟล์โมเดลที่ถูกต้องให้โดยอัตโนมัติ
 IMG_SIZE = 1280             # ขนาดความละเอียดในตรวจจับ (640 = มาตรฐาน/เร็ว, 1280 = แม่นยำวัตถุขนาดเล็กแต่ช้าลง)
 
 model = YOLO(MODEL_PATH)
@@ -43,6 +71,7 @@ OUTBOUND_END = (frame_width, LINE_Y)
 inbound_count = 0         # ตัวแปรเก็บจำนวนรถขาเข้า
 outbound_count = 0        # ตัวแปรเก็บจำนวนรถขาออก
 counted_ids = set()       # ชุดข้อมูลสำหรับเก็บ ID รถที่ถูกนับไปแล้ว
+track_history = {}        # ประวัติพิกัดรถเพื่อใช้เช็คกรณีข้ามเส้นแบ่ง
 # ---------------------------------------------------------
 
 while cap.isOpened():
@@ -54,7 +83,7 @@ while cap.isOpened():
 
     # 3. ตรวจจับและติดตามยานพาหนะ
    # เปลี่ยนจาก device=0 เป็น device='cpu' เพื่อไม่ให้โปรแกรม Error
-    results = model.track(frame, imgsz=IMG_SIZE, classes=[2, 3, 5, 7], persist=True, tracker="bytetrack.yaml", device='cpu')
+    results = model.track(frame, imgsz=IMG_SIZE, classes=[2, 3, 5, 7], persist=True, tracker="custom_tracker.yaml", device='cpu', conf=0.15)
 
     annotated_frame = results[0].plot()
 
@@ -76,21 +105,33 @@ while cap.isOpened():
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
             
-            offset = 15 
-
-            # เช็คเงื่อนไขเมื่อรถวิ่งผ่านระดับเส้น LINE_Y
-            if (LINE_Y - offset) < center_y < (LINE_Y + offset) and track_id not in counted_ids:
-                counted_ids.add(track_id)
+            # ตรวจสอบประวัติพิกัดรถเพื่อดูการข้ามเส้นสมมติ LINE_Y
+            if track_id in track_history:
+                prev_x, prev_y = track_history[track_id]
                 
-                # แยกนับตามตำแหน่งจุดกึ่งกลางของรถ (center_x) เปรียบเทียบกับจุดแบ่งเลน (MID_X)
-                if center_x < MID_X:
-                    inbound_count += 1   # อยู่ฝั่งซ้ายของจุดแบ่ง = ขาเข้า
-                    # ให้เส้นฝั่งซ้ายกะพริบเป็นสีแดงสั้นๆ เมื่อนับรถได้
-                    cv2.line(annotated_frame, INBOUND_START, INBOUND_END, (0, 0, 255), 5)
-                else:
-                    outbound_count += 1  # อยู่ฝั่งขวาของจุดแบ่ง = ขาออก
-                    # ให้เส้นฝั่งขวากะพริบเป็นสีแดงสั้นๆ เมื่อนับรถได้
-                    cv2.line(annotated_frame, OUTBOUND_START, OUTBOUND_END, (0, 0, 255), 5)
+                # เช็คการเคลื่อนที่ข้ามเส้น LINE_Y ระหว่างเฟรมก่อนหน้าและเฟรมปัจจุบัน
+                if (prev_y <= LINE_Y <= center_y) or (center_y <= LINE_Y <= prev_y):
+                    if track_id not in counted_ids:
+                        counted_ids.add(track_id)
+                        
+                        # คำนวณหาตำแหน่งแกน X ที่ข้ามเส้นโดยประมาณ
+                        if center_y != prev_y:
+                            cross_x = prev_x + (center_x - prev_x) * (LINE_Y - prev_y) / (center_y - prev_y)
+                        else:
+                            cross_x = center_x
+                            
+                        # แยกนับตามตำแหน่งจุดกึ่งกลางของรถ (cross_x) เปรียบเทียบกับจุดแบ่งเลน (MID_X)
+                        if cross_x < MID_X:
+                            inbound_count += 1   # อยู่ฝั่งซ้ายของจุดแบ่ง = ขาเข้า
+                            # ให้เส้นฝั่งซ้ายกะพริบเป็นสีแดงสั้นๆ เมื่อนับรถได้
+                            cv2.line(annotated_frame, INBOUND_START, INBOUND_END, (0, 0, 255), 5)
+                        else:
+                            outbound_count += 1  # อยู่ฝั่งขวาของจุดแบ่ง = ขาออก
+                            # ให้เส้นฝั่งขวากะพริบเป็นสีแดงสั้นๆ เมื่อนับรถได้
+                            cv2.line(annotated_frame, OUTBOUND_START, OUTBOUND_END, (0, 0, 255), 5)
+            
+            # อัปเดตประวัติพิกัด
+            track_history[track_id] = (center_x, center_y)
 
     # 5. แสดงผลสถิติแยกฝั่ง (สีข้อความตรงกับสีเส้น)
     cv2.putText(annotated_frame, f"Inbound (Left): {inbound_count}", (20, 50), 
