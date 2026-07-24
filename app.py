@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import torch
 import os
+import datetime
 from ultralytics import YOLO
 
 # ---------------------------------------------------------
@@ -141,6 +142,21 @@ mid_x_percentage = st.sidebar.slider(
     help="Adjusts the split point dividing Left (Inbound) and Right (Outbound) traffic lanes."
 )
 
+# 5. Video Filming Time Configuration
+st.sidebar.subheader("5. Video Filming Time")
+enable_filming_time = st.sidebar.checkbox(
+    "Specify Video Filming Time", 
+    value=True,
+    help="Enable to specify when this video was filmed to assess traffic level relative to real-world time."
+)
+
+if enable_filming_time:
+    filming_date = st.sidebar.date_input("Filming Date", value=pd.Timestamp.now().date())
+    filming_time = st.sidebar.time_input("Filming Start Time", value=datetime.time(8, 30))
+    start_datetime = datetime.datetime.combine(filming_date, filming_time)
+else:
+    start_datetime = datetime.datetime.now()
+
 # Class mappings to COCO index mappings
 class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
 coco_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
@@ -201,6 +217,50 @@ def get_video_metadata(vid_path):
         }
     return None
 
+def get_traffic_level(density):
+    if density <= 1.5:
+        return "Smooth (คล่องตัว)", "🟢", "Smooth"
+    elif density <= 4.0:
+        return "Moderate (ปานกลาง)", "🟡", "Moderate"
+    elif density <= 7.0:
+        return "Congested (หนาแน่น)", "🟠", "Congested"
+    else:
+        return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
+
+def generate_traffic_summary_table(flow_history, start_dt):
+    if not flow_history or start_dt is None:
+        return None
+    df = pd.DataFrame(flow_history)
+    if "Time (s)" not in df.columns or "Active Vehicles" not in df.columns:
+        return None
+        
+    df["Interval Time"] = df["Time (s)"].apply(lambda t: int(t // 10) * 10)
+    df["Interval Real Time"] = df["Interval Time"].apply(lambda t: (start_dt + datetime.timedelta(seconds=t)).strftime("%H:%M:%S"))
+    
+    summary = df.groupby("Interval Real Time").agg(
+        avg_active=("Active Vehicles", "mean"),
+        inbound_max=("Inbound", "max"),
+        inbound_min=("Inbound", "min"),
+        outbound_max=("Outbound", "max"),
+        outbound_min=("Outbound", "min"),
+    ).reset_index()
+    
+    summary["Vehicles Passed (Inbound)"] = summary["inbound_max"] - summary["inbound_min"]
+    summary["Vehicles Passed (Outbound)"] = summary["outbound_max"] - summary["outbound_min"]
+    
+    summary["Traffic Level"] = summary["avg_active"].apply(lambda d: f"{get_traffic_level(d)[1]} {get_traffic_level(d)[0]}")
+    summary["Avg Vehicles on Screen"] = summary["avg_active"].round(1)
+    
+    return summary[["Interval Real Time", "Avg Vehicles on Screen", "Traffic Level", "Vehicles Passed (Inbound)", "Vehicles Passed (Outbound)"]].rename(
+        columns={
+            "Interval Real Time": "ช่วงเวลา (Time)",
+            "Avg Vehicles on Screen": "ความหนาแน่นเฉลี่ย (Avg Vehicles)",
+            "Traffic Level": "ระดับการจราจร (Traffic Level)",
+            "Vehicles Passed (Inbound)": "จำนวนรถผ่านขาเข้า (Inbound Flow)",
+            "Vehicles Passed (Outbound)": "จำนวนรถผ่านขาออก (Outbound Flow)"
+        }
+    )
+
 # ---------------------------------------------------------
 # Session State Initialization
 # ---------------------------------------------------------
@@ -220,6 +280,10 @@ if "flow_history" not in st.session_state:
     st.session_state.flow_history = []
 if "track_history" not in st.session_state:
     st.session_state.track_history = {}
+if "active_vehicles_history" not in st.session_state:
+    st.session_state.active_vehicles_history = []
+if "start_datetime" not in st.session_state:
+    st.session_state.start_datetime = None
 
 # Load model
 model = None
@@ -273,6 +337,8 @@ if video_path is not None:
                 st.session_state.events_log = []
                 st.session_state.flow_history = []
                 st.session_state.track_history = {}
+                st.session_state.active_vehicles_history = []
+                st.session_state.start_datetime = start_datetime
         with col_btn2:
             stop_clicked = st.button("⏹️ Stop / Pause Analysis", type="secondary", use_container_width=True)
             if stop_clicked:
@@ -295,10 +361,18 @@ if video_path is not None:
             if len(st.session_state.events_log) > 0:
                 st.success(f"📈 Analysis ended/paused. Total Processed Count: {st.session_state.inbound_count + st.session_state.outbound_count} vehicles.")
                 
+                # Calculate final/average metrics
+                df_flow_all = pd.DataFrame(st.session_state.flow_history)
+                avg_density = df_flow_all["Active Vehicles"].mean() if not df_flow_all.empty else 0.0
+                peak_density = df_flow_all["Active Vehicles"].max() if not df_flow_all.empty else 0
+                avg_lvl, avg_emoji, _ = get_traffic_level(avg_density)
+                peak_lvl, peak_emoji, _ = get_traffic_level(peak_density)
+                
                 # Metrics cards
-                col_m1, col_m2 = st.columns(2)
+                col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Final Inbound Traffic", st.session_state.inbound_count)
                 col_m2.metric("Final Outbound Traffic", st.session_state.outbound_count)
+                col_m3.metric("Average Congestion Level", f"{avg_emoji} {avg_lvl}", help=f"Peak level: {peak_emoji} {peak_lvl}")
                 
                 # Visual charts breakdown
                 col_c1, col_c2 = st.columns([1, 1])
@@ -310,15 +384,21 @@ if video_path is not None:
                     })
                     st.bar_chart(df_classes.set_index("Vehicle Type"), use_container_width=True)
                 with col_c2:
-                    st.markdown("#### Cumulative Traffic Timeline")
-                    df_flow = pd.DataFrame(st.session_state.flow_history).drop_duplicates(subset=["Time (s)"], keep="last")
-                    st.line_chart(df_flow.set_index("Time (s)"), use_container_width=True)
+                    st.markdown("#### Cumulative Traffic Timeline (Real-world Time)")
+                    df_flow = pd.DataFrame(st.session_state.flow_history).drop_duplicates(subset=["Real-world Time"], keep="last")
+                    st.line_chart(df_flow.set_index("Real-world Time")[["Inbound", "Outbound", "Active Vehicles"]], use_container_width=True)
+                
+                # Grouped Traffic Summary Table
+                st.markdown("### 📊 ตารางสรุปสภาพการจราจรตามช่วงเวลา (Traffic Congestion Summary by Time)")
+                summary_df = generate_traffic_summary_table(st.session_state.flow_history, st.session_state.get("start_datetime", start_datetime))
+                if summary_df is not None:
+                    st.dataframe(summary_df, use_container_width=True)
                 
                 # CSV Export
                 df_events = pd.DataFrame(st.session_state.events_log)
                 csv_data = df_events.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Download Detailed CSV Tracking Log",
+                    label="📥 Download Detailed CSV Tracking Log (includes Real-world Time)",
                     data=csv_data,
                     file_name="KU_SRC_traffic_report.csv",
                     mime="text/csv",
@@ -331,9 +411,10 @@ if video_path is not None:
         # If PROCESSING, enter video streaming loop
         else:
             # Layout initialization
-            col_m1, col_m2 = st.columns(2)
+            col_m1, col_m2, col_m3 = st.columns(3)
             inbound_metric = col_m1.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
             outbound_metric = col_m2.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
+            traffic_level_metric = col_m3.metric("Current Traffic Level", "🟢 Smooth (คล่องตัว)")
             
             col_stream, col_charts = st.columns([3, 2])
             with col_stream:
@@ -386,6 +467,21 @@ if video_path is not None:
                 cv2.line(annotated_frame, OUTBOUND_START, OUTBOUND_END, (0, 165, 255), 3)   # Orange
                 cv2.circle(annotated_frame, (MID_X, LINE_Y), 6, (0, 0, 255), -1)            # Red division dot
                 
+                # Calculate active count and traffic level
+                active_ids = results[0].boxes.id.int().cpu().tolist() if results[0].boxes.id is not None else []
+                active_count = len(active_ids)
+                st.session_state.active_vehicles_history.append(active_count)
+                if len(st.session_state.active_vehicles_history) > 15:
+                    st.session_state.active_vehicles_history.pop(0)
+                rolling_density = sum(st.session_state.active_vehicles_history) / len(st.session_state.active_vehicles_history)
+                lvl_th, emoji, lvl_en = get_traffic_level(rolling_density)
+                
+                # Calculate times
+                timestamp_sec = frame_idx / fps
+                current_real_time = st.session_state.start_datetime + datetime.timedelta(seconds=timestamp_sec)
+                real_time_str = current_real_time.strftime("%H:%M:%S")
+                real_time_full_str = current_real_time.strftime("%Y-%m-%d %H:%M:%S")
+                
                 # Track matching and line crossover engine
                 if results[0].boxes.id is not None:
                     boxes = results[0].boxes.xyxy.cpu().numpy()
@@ -413,7 +509,6 @@ if video_path is not None:
                                         cross_x = center_x
                                         
                                     class_name = coco_to_name.get(class_idx, "Unknown")
-                                    timestamp_sec = frame_idx / fps
                                     
                                     # Increment respective traffic lanes counter
                                     if cross_x < MID_X:
@@ -433,9 +528,11 @@ if video_path is not None:
                                     # Log event record details
                                     st.session_state.events_log.append({
                                         "Timestamp (s)": round(timestamp_sec, 2),
+                                        "Real-world Time": real_time_full_str,
                                         "Vehicle ID": track_id,
                                         "Type": class_name,
-                                        "Direction": direction
+                                        "Direction": direction,
+                                        "Traffic Level": f"{emoji} {lvl_th}"
                                     })
                         
                         # Update coordinate tracker history mapping
@@ -446,18 +543,30 @@ if video_path is not None:
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 3)
                 cv2.putText(annotated_frame, f"Outbound: {st.session_state.outbound_count}", (20, 90), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 3)
+                cv2.putText(annotated_frame, f"Time: {real_time_str}", (20, 130), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                
+                # Level color coding
+                color_map = {"Smooth": (0, 255, 0), "Moderate": (0, 255, 255), "Congested": (0, 165, 255), "Gridlock": (0, 0, 255)}
+                text_color = color_map.get(lvl_en, (255, 255, 255))
+                cv2.putText(annotated_frame, f"Traffic: {lvl_en}", (20, 170), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, text_color, 3)
                 
                 # Store timeline analytics data point
-                current_time = frame_idx / fps
                 st.session_state.flow_history.append({
-                    "Time (s)": round(current_time, 1),
+                    "Time (s)": round(timestamp_sec, 1),
+                    "Real-world Time": real_time_str,
                     "Inbound": st.session_state.inbound_count,
-                    "Outbound": st.session_state.outbound_count
+                    "Outbound": st.session_state.outbound_count,
+                    "Active Vehicles": active_count,
+                    "Traffic Level": f"{emoji} {lvl_th}",
+                    "Density Score": round(rolling_density, 2)
                 })
                 
                 # Real-time UI updates
                 inbound_metric.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
                 outbound_metric.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
+                traffic_level_metric.metric("Current Traffic Level", f"{emoji} {lvl_th}")
                 
                 # Push BGR -> RGB color converted frames live to Streamlit
                 frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
@@ -472,9 +581,9 @@ if video_path is not None:
                 class_chart_placeholder.bar_chart(df_classes_live.set_index("Vehicle Type"), use_container_width=True)
                 
                 if len(st.session_state.flow_history) > 0:
-                    df_flow_live = pd.DataFrame(st.session_state.flow_history).drop_duplicates(subset=["Time (s)"], keep="last")
+                    df_flow_live = pd.DataFrame(st.session_state.flow_history).drop_duplicates(subset=["Real-world Time"], keep="last")
                     flow_chart_title.markdown("#### Cumulative Traffic Timeline")
-                    flow_chart_placeholder.line_chart(df_flow_live.set_index("Time (s)"), use_container_width=True)
+                    flow_chart_placeholder.line_chart(df_flow_live.set_index("Real-world Time")[["Inbound", "Outbound", "Active Vehicles"]], use_container_width=True)
                 
                 # Update visual progress widgets
                 progress_val = min(frame_idx / total_frames, 1.0)
