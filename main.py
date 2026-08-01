@@ -34,7 +34,7 @@ def resolve_model_path(model_path):
 # สามารถเลือกใช้ได้ทั้ง YOLOv11 (แนะนำ) หรือเปลี่ยนเป็น YOLOv8 ได้ตามต้องการ
 # ตัวอย่างโมเดล YOLOv11 ที่มีในโฟลเดอร์: "yolov11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt"
 # ตัวอย่างโมเดล YOLOv8 ที่มีในโฟลเดอร์: "yolov8n.pt"
-MODEL_PATH = resolve_model_path("yolov11n.pt")  # ระบบจะตรวจสอบและดึงไฟล์โมเดลที่ถูกต้องให้โดยอัตโนมัติ
+MODEL_PATH = "best.pt" if os.path.exists("best.pt") else resolve_model_path("yolov11n.pt")  # ใช้โมเดลที่ fine-tune แล้ว ถ้าไม่มีจะ fallback ไป yolov11n.pt
 IMG_SIZE = 1280             # ขนาดความละเอียดในตรวจจับ (640 = มาตรฐาน/เร็ว, 1280 = แม่นยำวัตถุขนาดเล็กแต่ช้าลง)
 
 model = YOLO(MODEL_PATH)
@@ -81,13 +81,23 @@ if fps <= 0:
     fps = 30.0
 frame_idx = 0
 active_vehicles_history = []
+inbound_active_history  = []   # ประวัติ density ขาเข้า
+outbound_active_history = []   # ประวัติ density ขาออก
+prev_positions          = {}   # ตำแหน่งเฟรมก่อนหน้า สำหรับหา stall_ratio
+WINDOW = 30                    # rolling window size
 
-def get_traffic_level(density):
-    if density <= 1.5:
+def get_traffic_level(density, stall_ratio=0.0):
+    """
+    ประเมินระดับการจราจรตามทั้งปริมาณรถและการเคลื่อนตัว
+    density    : จำนวนรถเฉลี่ยในจอ (rolling average)
+    stall_ratio: 0-1 สัดส่วนรถที่แทบไม่ขยับ
+    """
+    score = density * (1.0 + 0.5 * stall_ratio)
+    if score <= 2.5:
         return "Smooth (คล่องตัว)", "🟢", "Smooth"
-    elif density <= 4.0:
+    elif score <= 5.5:
         return "Moderate (ปานกลาง)", "🟡", "Moderate"
-    elif density <= 7.0:
+    elif score <= 9.0:
         return "Congested (หนาแน่น)", "🟠", "Congested"
     else:
         return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
@@ -110,11 +120,47 @@ while cap.isOpened():
     # คำนวณความหนาแน่นและระดับการจราจร
     active_ids = results[0].boxes.id.int().cpu().tolist() if results[0].boxes.id is not None else []
     active_count = len(active_ids)
+
+    # --- stall_ratio: วัดสัดส่วนรถที่แทบไม่เคลื่อน (<5px) ---
+    stall_count = 0
+    current_positions = {}
+    if results[0].boxes.id is not None:
+        bxs = results[0].boxes.xyxy.cpu().numpy()
+        ids_now = results[0].boxes.id.int().cpu().tolist()
+        for bx, tid in zip(bxs, ids_now):
+            cx = int((bx[0] + bx[2]) / 2)
+            cy = int((bx[1] + bx[3]) / 2)
+            current_positions[tid] = (cx, cy)
+            if tid in prev_positions:
+                px, py = prev_positions[tid]
+                if ((cx - px)**2 + (cy - py)**2) ** 0.5 < 5:
+                    stall_count += 1
+    prev_positions.clear()
+    prev_positions.update(current_positions)
+    stall_ratio = (stall_count / active_count) if active_count > 0 else 0.0
+
+    # --- density แยกขาเข้า/ขาออก ---
+    inbound_active = 0
+    outbound_active = 0
+    if results[0].boxes.id is not None:
+        for bx2 in results[0].boxes.xyxy.cpu().numpy():
+            cx2 = int((bx2[0] + bx2[2]) / 2)
+            if cx2 < MID_X:
+                inbound_active += 1
+            else:
+                outbound_active += 1
+
     active_vehicles_history.append(active_count)
-    if len(active_vehicles_history) > 15:
+    inbound_active_history.append(inbound_active)
+    outbound_active_history.append(outbound_active)
+    if len(active_vehicles_history) > WINDOW:
         active_vehicles_history.pop(0)
-    rolling_density = sum(active_vehicles_history) / len(active_vehicles_history)
-    lvl_th, emoji, lvl_en = get_traffic_level(rolling_density)
+        inbound_active_history.pop(0)
+        outbound_active_history.pop(0)
+    rolling_density          = sum(active_vehicles_history)  / len(active_vehicles_history)
+    rolling_inbound_density  = sum(inbound_active_history)   / len(inbound_active_history)
+    rolling_outbound_density = sum(outbound_active_history)  / len(outbound_active_history)
+    lvl_th, emoji, lvl_en = get_traffic_level(rolling_density, stall_ratio)
 
     # คำนวณเวลาจริงของเฟรม
     timestamp_sec = frame_idx / fps
@@ -170,19 +216,21 @@ while cap.isOpened():
             track_history[track_id] = (center_x, center_y)
 
     # 5. แสดงผลสถิติแยกฝั่ง (สีข้อความตรงกับสีเส้น)
-    cv2.putText(annotated_frame, f"Inbound (Left): {inbound_count}", (20, 50), 
+    cv2.putText(annotated_frame, f"Inbound (Left): {inbound_count}", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 3)
-    
-    cv2.putText(annotated_frame, f"Outbound (Right): {outbound_count}", (20, 90), 
+    cv2.putText(annotated_frame, f"Outbound (Right): {outbound_count}", (20, 90),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 3)
-
-    cv2.putText(annotated_frame, f"Time: {real_time_str}", (20, 130), 
+    cv2.putText(annotated_frame, f"Time: {real_time_str}", (20, 130),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
-
     color_map = {"Smooth": (0, 255, 0), "Moderate": (0, 255, 255), "Congested": (0, 165, 255), "Gridlock": (0, 0, 255)}
     text_color = color_map.get(lvl_en, (255, 255, 255))
-    cv2.putText(annotated_frame, f"Traffic: {lvl_en}", (20, 170), 
+    cv2.putText(annotated_frame, f"Traffic: {lvl_en}", (20, 170),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, text_color, 3)
+    # แสดง density แยกขาเข้า/ขาออก
+    cv2.putText(annotated_frame, f"In-Density: {rolling_inbound_density:.1f}", (20, 210),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+    cv2.putText(annotated_frame, f"Out-Density: {rolling_outbound_density:.1f}", (20, 245),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
     # ---------------------------------------------------------
 
     # 6. ย่อขนาดภาพก่อนแสดงผล เพื่อไม่ให้ล้นจอ

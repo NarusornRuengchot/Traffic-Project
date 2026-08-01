@@ -95,6 +95,16 @@ else:
         help="n: Nano (fastest), s: Small, m: Medium, l: Large, x: Extra-Large"
     )
 
+# Fine-tuned model option
+if os.path.exists("best.pt"):
+    use_finetuned = st.sidebar.checkbox(
+        "🎯 ใช้โมเดลที่ Fine-tuned แล้ว (best.pt)",
+        value=True,
+        help="โมเดลที่เทรนเพิ่มเติมจาก Kaggle — แม่นยำกว่าสำหรับ bus, car, motorcycle, truck"
+    )
+    if use_finetuned:
+        model_size = "best.pt"
+
 conf_threshold = st.sidebar.slider(
     "Model Confidence Threshold:",
     min_value=0.10, max_value=1.00, value=0.25, step=0.05,
@@ -157,9 +167,14 @@ if enable_filming_time:
 else:
     start_datetime = datetime.datetime.now()
 
-# Class mappings to COCO index mappings
-class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
-coco_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
+# Class mappings — fine-tuned model ใช้ class index 0-3 (bus=0, car=1, motorcycle=2, truck=3)
+# COCO model ใช้ index ปกติ (car=2, motorcycle=3, bus=5, truck=7)
+if model_size == "best.pt":
+    class_map = {"Car": 1, "Motorcycle": 2, "Bus": 0, "Truck": 3}
+    coco_to_name = {1: "Car", 2: "Motorcycle", 0: "Bus", 3: "Truck"}
+else:
+    class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
+    coco_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
 selected_class_ids = [class_map[c] for c in target_classes]
 
 def resolve_model_path(model_name):
@@ -217,12 +232,23 @@ def get_video_metadata(vid_path):
         }
     return None
 
-def get_traffic_level(density):
-    if density <= 1.5:
+def get_traffic_level(density, stall_ratio=0.0):
+    """
+    ประเมินระดับการจราจรโดยพิจารณาทั้งจำนวนรถ และสัดส่วนรถที่หยุดนิ่ง
+    density    : จำนวนรถเฉลี่ยบนจอ (rolling average)
+    stall_ratio: สัดส่วน 0-1 ของรถที่แทบไม่ขยับ (0 = ทุกคันวิ่ง, 1 = หยุดหมด)
+    """
+    # คะแนนรวม: ให้น้ำหนักทั้งปริมาณรถ และการหยุดนิ่ง
+    # stall_ratio ทำให้คะแนนสูงขึ้นสูงสุด 50% เมื่อรถหยุดทั้งหมด
+    score = density * (1.0 + 0.5 * stall_ratio)
+
+    # Threshold ปรับให้เหมาะกับถนนในมหาวิทยาลัย (ไม่ได้เป็นทางหลวง)
+    # ถนนแคบ รถ 3-4 คันก็เริ่มแน่นแล้ว
+    if score <= 2.5:
         return "Smooth (คล่องตัว)", "🟢", "Smooth"
-    elif density <= 4.0:
+    elif score <= 5.5:
         return "Moderate (ปานกลาง)", "🟡", "Moderate"
-    elif density <= 7.0:
+    elif score <= 9.0:
         return "Congested (หนาแน่น)", "🟠", "Congested"
     else:
         return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
@@ -284,6 +310,14 @@ if "active_vehicles_history" not in st.session_state:
     st.session_state.active_vehicles_history = []
 if "start_datetime" not in st.session_state:
     st.session_state.start_datetime = None
+# ประวัติพิกัดรถสำหรับคำนวณ stall ratio (ว่ารถวิ่งหรือหยุด)
+if "prev_positions" not in st.session_state:
+    st.session_state.prev_positions = {}
+# ประวัติตำแหน่งรถแยกฝั่งเพื่อคำนวณ density ขาเข้า/ขาออก
+if "inbound_active_history" not in st.session_state:
+    st.session_state.inbound_active_history = []
+if "outbound_active_history" not in st.session_state:
+    st.session_state.outbound_active_history = []
 
 # Load model
 model = None
@@ -338,6 +372,9 @@ if video_path is not None:
                 st.session_state.flow_history = []
                 st.session_state.track_history = {}
                 st.session_state.active_vehicles_history = []
+                st.session_state.prev_positions = {}
+                st.session_state.inbound_active_history = []
+                st.session_state.outbound_active_history = []
                 st.session_state.start_datetime = start_datetime
         with col_btn2:
             stop_clicked = st.button("⏹️ Stop / Pause Analysis", type="secondary", use_container_width=True)
@@ -415,6 +452,10 @@ if video_path is not None:
             inbound_metric = col_m1.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
             outbound_metric = col_m2.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
             traffic_level_metric = col_m3.metric("Current Traffic Level", "🟢 Smooth (คล่องตัว)")
+            # แถบแยก density ขาเข้า/ขาออก
+            col_d1, col_d2 = st.columns(2)
+            inbound_density_metric = col_d1.metric("🔵 Inbound Density (ขาเข้า)", "0 คัน")
+            outbound_density_metric = col_d2.metric("🟠 Outbound Density (ขาออก)", "0 คัน")
             
             col_stream, col_charts = st.columns([3, 2])
             with col_stream:
@@ -470,11 +511,52 @@ if video_path is not None:
                 # Calculate active count and traffic level
                 active_ids = results[0].boxes.id.int().cpu().tolist() if results[0].boxes.id is not None else []
                 active_count = len(active_ids)
+
+                # --- คำนวณ stall_ratio: สัดส่วนรถที่หยุดนิ่ง (เคลื่อนที่น้อยกว่า 5px ระหว่างเฟรม) ---
+                stall_count = 0
+                current_positions = {}
+                if results[0].boxes.id is not None:
+                    boxes_xy = results[0].boxes.xyxy.cpu().numpy()
+                    ids_now = results[0].boxes.id.int().cpu().tolist()
+                    for bx, tid in zip(boxes_xy, ids_now):
+                        cx = int((bx[0] + bx[2]) / 2)
+                        cy = int((bx[1] + bx[3]) / 2)
+                        current_positions[tid] = (cx, cy)
+                        if tid in st.session_state.prev_positions:
+                            px, py = st.session_state.prev_positions[tid]
+                            dist = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+                            if dist < 5:  # เคลื่อนที่น้อยกว่า 5px ถือว่าหยุด
+                                stall_count += 1
+                st.session_state.prev_positions = current_positions
+                stall_ratio = (stall_count / active_count) if active_count > 0 else 0.0
+
+                # --- คำนวณ density แยกขาเข้า/ขาออก ---
+                inbound_active = 0
+                outbound_active = 0
+                if results[0].boxes.id is not None:
+                    boxes_xy2 = results[0].boxes.xyxy.cpu().numpy()
+                    ids_now2 = results[0].boxes.id.int().cpu().tolist()
+                    for bx2, tid2 in zip(boxes_xy2, ids_now2):
+                        cx2 = int((bx2[0] + bx2[2]) / 2)
+                        if cx2 < MID_X:
+                            inbound_active += 1
+                        else:
+                            outbound_active += 1
+
+                # Rolling window ยาว 30 เฟรม เพื่อลด noise
+                WINDOW = 30
                 st.session_state.active_vehicles_history.append(active_count)
-                if len(st.session_state.active_vehicles_history) > 15:
+                st.session_state.inbound_active_history.append(inbound_active)
+                st.session_state.outbound_active_history.append(outbound_active)
+                if len(st.session_state.active_vehicles_history) > WINDOW:
                     st.session_state.active_vehicles_history.pop(0)
+                    st.session_state.inbound_active_history.pop(0)
+                    st.session_state.outbound_active_history.pop(0)
                 rolling_density = sum(st.session_state.active_vehicles_history) / len(st.session_state.active_vehicles_history)
-                lvl_th, emoji, lvl_en = get_traffic_level(rolling_density)
+                rolling_inbound_density = sum(st.session_state.inbound_active_history) / len(st.session_state.inbound_active_history)
+                rolling_outbound_density = sum(st.session_state.outbound_active_history) / len(st.session_state.outbound_active_history)
+
+                lvl_th, emoji, lvl_en = get_traffic_level(rolling_density, stall_ratio)
                 
                 # Calculate times
                 timestamp_sec = frame_idx / fps
@@ -559,6 +641,9 @@ if video_path is not None:
                     "Inbound": st.session_state.inbound_count,
                     "Outbound": st.session_state.outbound_count,
                     "Active Vehicles": active_count,
+                    "Inbound Active": round(rolling_inbound_density, 2),
+                    "Outbound Active": round(rolling_outbound_density, 2),
+                    "Stall Ratio": round(stall_ratio, 2),
                     "Traffic Level": f"{emoji} {lvl_th}",
                     "Density Score": round(rolling_density, 2)
                 })
@@ -567,6 +652,17 @@ if video_path is not None:
                 inbound_metric.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
                 outbound_metric.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
                 traffic_level_metric.metric("Current Traffic Level", f"{emoji} {lvl_th}")
+                # อัปเดต density แยกฝั่ง
+                inbound_density_metric.metric(
+                    "🔵 Inbound Density (ขาเข้า)",
+                    f"{rolling_inbound_density:.1f} คัน",
+                    help=f"จำนวนรถขาเข้าที่อยู่บนจอเฉลี่ย {WINDOW} เฟรมล่าสุด"
+                )
+                outbound_density_metric.metric(
+                    "🟠 Outbound Density (ขาออก)",
+                    f"{rolling_outbound_density:.1f} คัน",
+                    help=f"จำนวนรถขาออกที่อยู่บนจอเฉลี่ย {WINDOW} เฟรมล่าสุด"
+                )
                 
                 # Push BGR -> RGB color converted frames live to Streamlit
                 frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
