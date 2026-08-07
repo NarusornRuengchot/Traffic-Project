@@ -92,12 +92,15 @@ def get_traffic_level(density, stall_ratio=0.0):
     density    : จำนวนรถเฉลี่ยในจอ (rolling average)
     stall_ratio: 0-1 สัดส่วนรถที่แทบไม่ขยับ
     """
-    score = density * (1.0 + 0.5 * stall_ratio)
-    if score <= 2.5:
+    # stall_ratio เพิ่มคะแนนเล็กน้อย (0.2) เพื่อไม่ให้ Gridlock เร็วเกินไปจากรถหยุดรอระสั้นๆ
+    score = density * (1.0 + 0.2 * stall_ratio)
+
+    # Threshold ปรับเพื่อให้เหมาะถนน 4 เลนในมหาวิทยาลัย
+    if score <= 5:
         return "Smooth (คล่องตัว)", "🟢", "Smooth"
-    elif score <= 5.5:
+    elif score <= 12:
         return "Moderate (ปานกลาง)", "🟡", "Moderate"
-    elif score <= 9.0:
+    elif score <= 20:
         return "Congested (หนาแน่น)", "🟠", "Congested"
     else:
         return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
@@ -226,10 +229,12 @@ while cap.isOpened():
     text_color = color_map.get(lvl_en, (255, 255, 255))
     cv2.putText(annotated_frame, f"Traffic: {lvl_en}", (20, 170),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, text_color, 3)
-    # แสดง density แยกขาเข้า/ขาออก
-    cv2.putText(annotated_frame, f"In-Density: {rolling_inbound_density:.1f}", (20, 210),
+    # แสดงระดับการจราจรแยกขาเข้า/ขาออก
+    _, in_emoji, in_lvl_en  = get_traffic_level(rolling_inbound_density,  stall_ratio)
+    _, out_emoji, out_lvl_en = get_traffic_level(rolling_outbound_density, stall_ratio)
+    cv2.putText(annotated_frame, f"Inbound:  {in_lvl_en}",  (20, 210),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-    cv2.putText(annotated_frame, f"Out-Density: {rolling_outbound_density:.1f}", (20, 245),
+    cv2.putText(annotated_frame, f"Outbound: {out_lvl_en}", (20, 245),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
     # ---------------------------------------------------------
 

@@ -16,33 +16,142 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for rich dashboard styling
-st.markdown("""
+# ---------------------------------------------------------
+# Dark / Light Mode State
+# ---------------------------------------------------------
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True  # default: dark mode
+
+# Toggle button in the top-right area
+col_title_area, col_theme_btn = st.columns([10, 1])
+with col_theme_btn:
+    if st.button("🌙" if not st.session_state.dark_mode else "☀️", help="Switch between Dark / Light mode", key="theme_toggle"):
+        st.session_state.dark_mode = not st.session_state.dark_mode
+        st.rerun()
+
+# Inject dynamic CSS based on current theme
+if st.session_state.dark_mode:
+    THEME_BG          = "#0F1117"
+    THEME_CARD_BG     = "#1C1F2B"
+    THEME_SIDEBAR_BG  = "#161822"
+    THEME_TEXT        = "#E8ECF4"
+    THEME_SUBTEXT     = "#A0A8BC"
+    THEME_BORDER      = "#2E3348"
+    THEME_ACCENT      = "#4F8EF7"
+    THEME_HEADER_CLR  = "#7EB3FF"
+    THEME_METRIC_CLR  = "#E8ECF4"
+    THEME_BTN_BG      = "#2563EB"
+    THEME_BTN_TEXT    = "#FFFFFF"
+else:
+    THEME_BG          = "#F0F4FF"
+    THEME_CARD_BG     = "#FFFFFF"
+    THEME_SIDEBAR_BG  = "#EEF2FF"
+    THEME_TEXT        = "#1E293B"
+    THEME_SUBTEXT     = "#4B5563"
+    THEME_BORDER      = "#CBD5E1"
+    THEME_ACCENT      = "#2563EB"
+    THEME_HEADER_CLR  = "#1E3A8A"
+    THEME_METRIC_CLR  = "#1E293B"
+    THEME_BTN_BG      = "#3B82F6"
+    THEME_BTN_TEXT    = "#FFFFFF"
+
+st.markdown(f"""
     <style>
-        .main-header {
+        /* ===== Global Background ===== */
+        .stApp, .stApp > header {{
+            background-color: {THEME_BG} !important;
+        }}
+        /* ===== Main Content Area ===== */
+        section.main > div.block-container {{
+            background-color: {THEME_BG};
+            padding-top: 1rem;
+        }}
+        /* ===== Sidebar ===== */
+        section[data-testid="stSidebar"] > div {{
+            background-color: {THEME_SIDEBAR_BG} !important;
+            border-right: 1px solid {THEME_BORDER};
+        }}
+        section[data-testid="stSidebar"] * {{
+            color: {THEME_TEXT} !important;
+        }}
+        /* ===== Typography ===== */
+        .main-header {{
             font-size: 2.2rem;
             font-weight: 700;
-            color: #1E3A8A;
+            color: {THEME_HEADER_CLR};
             margin-bottom: 0.1rem;
-        }
-        .sub-header {
+        }}
+        .sub-header {{
             font-size: 1.1rem;
-            color: #4B5563;
-            margin-bottom: 2rem;
-        }
-        div[data-testid="stMetricValue"] {
+            color: {THEME_SUBTEXT};
+            margin-bottom: 1.5rem;
+        }}
+        /* ===== Metric Cards ===== */
+        div[data-testid="stMetricValue"] {{
             font-size: 2.5rem;
             font-weight: 800;
-        }
-        div[data-testid="stMetricLabel"] {
+            color: {THEME_METRIC_CLR} !important;
+        }}
+        div[data-testid="stMetricLabel"] {{
             font-size: 1rem;
             font-weight: 600;
-        }
+            color: {THEME_SUBTEXT} !important;
+        }}
+        div[data-testid="metric-container"] {{
+            background-color: {THEME_CARD_BG};
+            border: 1px solid {THEME_BORDER};
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+        }}
+        /* ===== General text ===== */
+        p, h1, h2, h3, h4, h5, h6, label, .stMarkdown, .stText {{
+            color: {THEME_TEXT} !important;
+        }}
+        /* ===== Info/Success/Warning boxes ===== */
+        div[data-testid="stAlert"] {{
+            background-color: {THEME_CARD_BG};
+            border-color: {THEME_BORDER};
+            color: {THEME_TEXT};
+        }}
+        /* ===== DataFrames ===== */
+        div[data-testid="stDataFrame"] {{
+            background-color: {THEME_CARD_BG};
+            border-radius: 10px;
+        }}
+        /* ===== Buttons ===== */
+        .stButton > button {{
+            background-color: {THEME_BTN_BG};
+            color: {THEME_BTN_TEXT};
+            border: none;
+            border-radius: 8px;
+            transition: opacity 0.2s;
+        }}
+        .stButton > button:hover {{
+            opacity: 0.85;
+        }}
+        /* ===== Progress bar ===== */
+        div[data-testid="stProgress"] > div {{
+            background-color: {THEME_ACCENT};
+        }}
+        /* ===== Expander ===== */
+        details {{
+            background-color: {THEME_CARD_BG};
+            border: 1px solid {THEME_BORDER};
+            border-radius: 10px;
+        }}
+        /* ===== selectbox / slider / radio track ===== */
+        .stSelectbox > div > div,
+        .stMultiSelect > div > div {{
+            background-color: {THEME_CARD_BG};
+            color: {THEME_TEXT};
+            border-color: {THEME_BORDER};
+        }}
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header">🚗 Kasetsart University Sriracha Campus</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Real-time Vehicle Detection, Tracking & Counting Dashboard (YOLOv11 / YOLOv8)</div>', unsafe_allow_html=True)
+with col_title_area:
+    st.markdown('<div class="main-header">🚗 Kasetsart University Sriracha Campus</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Real-time Vehicle Detection, Tracking &amp; Counting Dashboard (YOLOv11 / YOLOv8)</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Sidebar Panel Configuration
@@ -149,8 +258,20 @@ line_y_percentage = st.sidebar.slider(
 mid_x_percentage = st.sidebar.slider(
     "Lane Divider (Horizontal %)", 
     min_value=0.1, max_value=0.9, value=0.45, step=0.05,
-    help="Adjusts the split point dividing Left (Inbound) and Right (Outbound) traffic lanes."
+    help="Adjusts the split point dividing Left and Right traffic lanes."
 )
+
+# 4b. Direction Swap
+st.sidebar.subheader("4b. Lane Direction")
+swap_directions = st.sidebar.toggle(
+    "🔄 สลับ Inbound ↔ Outbound",
+    value=False,
+    help="เปิดเพื่อสลับทิศทาง: ฝั่งซ้ายจะกลายเป็น Outbound และฝั่งขวาจะกลายเป็น Inbound"
+)
+if swap_directions:
+    st.sidebar.info("🔄 โหมดสลับทิศทาง: ซ้าย = Outbound | ขวา = Inbound")
+else:
+    st.sidebar.info("➡️ โหมดปกติ: ซ้าย = Inbound | ขวา = Outbound")
 
 # 5. Video Filming Time Configuration
 st.sidebar.subheader("5. Video Filming Time")
@@ -238,17 +359,15 @@ def get_traffic_level(density, stall_ratio=0.0):
     density    : จำนวนรถเฉลี่ยบนจอ (rolling average)
     stall_ratio: สัดส่วน 0-1 ของรถที่แทบไม่ขยับ (0 = ทุกคันวิ่ง, 1 = หยุดหมด)
     """
-    # คะแนนรวม: ให้น้ำหนักทั้งปริมาณรถ และการหยุดนิ่ง
-    # stall_ratio ทำให้คะแนนสูงขึ้นสูงสุด 50% เมื่อรถหยุดทั้งหมด
-    score = density * (1.0 + 0.5 * stall_ratio)
+    # stall_ratio เพิ่มคะแนนเล็กน้อย (0.2) เพื่อไม่ให้ Gridlock เร็วเกินไปจากรถหยุดรอระสั้นๆ
+    score = density * (1.0 + 0.2 * stall_ratio)
 
-    # Threshold ปรับให้เหมาะกับถนนในมหาวิทยาลัย (ไม่ได้เป็นทางหลวง)
-    # ถนนแคบ รถ 3-4 คันก็เริ่มแน่นแล้ว
-    if score <= 2.5:
+    # Threshold ปรับเพื่อให้เหมาะถนน 4 เลนในมหาวิทยาลัย
+    if score <= 5:
         return "Smooth (คล่องตัว)", "🟢", "Smooth"
-    elif score <= 5.5:
+    elif score <= 12:
         return "Moderate (ปานกลาง)", "🟡", "Moderate"
-    elif score <= 9.0:
+    elif score <= 20:
         return "Congested (หนาแน่น)", "🟠", "Congested"
     else:
         return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
@@ -447,15 +566,27 @@ if video_path is not None:
         
         # If PROCESSING, enter video streaming loop
         else:
+            # Dynamic labels based on swap_directions
+            if swap_directions:
+                left_label  = "Outbound"
+                right_label = "Inbound"
+                left_emoji  = "🟠"
+                right_emoji = "🔵"
+            else:
+                left_label  = "Inbound"
+                right_label = "Outbound"
+                left_emoji  = "🔵"
+                right_emoji = "🟠"
+
             # Layout initialization
             col_m1, col_m2, col_m3 = st.columns(3)
-            inbound_metric = col_m1.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
-            outbound_metric = col_m2.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
+            inbound_metric = col_m1.metric(f"{left_emoji} {left_label} Count (Left Lanes)", st.session_state.inbound_count)
+            outbound_metric = col_m2.metric(f"{right_emoji} {right_label} Count (Right Lanes)", st.session_state.outbound_count)
             traffic_level_metric = col_m3.metric("Current Traffic Level", "🟢 Smooth (คล่องตัว)")
             # แถบแยก density ขาเข้า/ขาออก
             col_d1, col_d2 = st.columns(2)
-            inbound_density_metric = col_d1.metric("🔵 Inbound Density (ขาเข้า)", "0 คัน")
-            outbound_density_metric = col_d2.metric("🟠 Outbound Density (ขาออก)", "0 คัน")
+            inbound_density_metric  = col_d1.metric(f"{left_emoji} {left_label} Density", "0 คัน")
+            outbound_density_metric = col_d2.metric(f"{right_emoji} {right_label} Density", "0 คัน")
             
             col_stream, col_charts = st.columns([3, 2])
             with col_stream:
@@ -593,14 +724,26 @@ if video_path is not None:
                                     class_name = coco_to_name.get(class_idx, "Unknown")
                                     
                                     # Increment respective traffic lanes counter
+                                    # swap_directions flips which side is Inbound vs Outbound
+                                    left_is_inbound = not swap_directions  # True by default
                                     if cross_x < MID_X:
-                                        st.session_state.inbound_count += 1
-                                        direction = "Inbound"
+                                        # Left side
+                                        if left_is_inbound:
+                                            st.session_state.inbound_count += 1
+                                            direction = "Inbound"
+                                        else:
+                                            st.session_state.outbound_count += 1
+                                            direction = "Outbound"
                                         # Visual flash line for feedback
                                         cv2.line(annotated_frame, INBOUND_START, INBOUND_END, (0, 0, 255), 6)
                                     else:
-                                        st.session_state.outbound_count += 1
-                                        direction = "Outbound"
+                                        # Right side
+                                        if left_is_inbound:
+                                            st.session_state.outbound_count += 1
+                                            direction = "Outbound"
+                                        else:
+                                            st.session_state.inbound_count += 1
+                                            direction = "Inbound"
                                         # Visual flash line for feedback
                                         cv2.line(annotated_frame, OUTBOUND_START, OUTBOUND_END, (0, 0, 255), 6)
                                         
@@ -621,18 +764,46 @@ if video_path is not None:
                         st.session_state.track_history[track_id] = (center_x, center_y)
                 
                 # Superimpose dynamic HUD statistics onto the frame itself
-                cv2.putText(annotated_frame, f"Inbound: {st.session_state.inbound_count}", (20, 50), 
+                # When swapped: left side = Outbound, right side = Inbound
+                if swap_directions:
+                    hud_left_label  = "Outbound"
+                    hud_right_label = "Inbound"
+                    hud_left_count  = st.session_state.outbound_count
+                    hud_right_count = st.session_state.inbound_count
+                else:
+                    hud_left_label  = "Inbound"
+                    hud_right_label = "Outbound"
+                    hud_left_count  = st.session_state.inbound_count
+                    hud_right_count = st.session_state.outbound_count
+
+                cv2.putText(annotated_frame, f"{hud_left_label}: {hud_left_count}", (20, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 3)
-                cv2.putText(annotated_frame, f"Outbound: {st.session_state.outbound_count}", (20, 90), 
+                cv2.putText(annotated_frame, f"{hud_right_label}: {hud_right_count}", (20, 90), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 3)
                 cv2.putText(annotated_frame, f"Time: {real_time_str}", (20, 130), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
                 
-                # Level color coding
+                # Level color coding — per-direction traffic levels
+                _, in_emoji, in_lvl_en   = get_traffic_level(rolling_inbound_density,  stall_ratio)
+                _, out_emoji, out_lvl_en = get_traffic_level(rolling_outbound_density, stall_ratio)
+
+                # Map direction labels based on swap state
+                if swap_directions:
+                    hud_in_label  = hud_right_label   # Inbound = right side when swapped
+                    hud_out_label = hud_left_label
+                    hud_in_lvl    = out_lvl_en        # density is still computed per screen side
+                    hud_out_lvl   = in_lvl_en
+                else:
+                    hud_in_label  = hud_left_label
+                    hud_out_label = hud_right_label
+                    hud_in_lvl    = in_lvl_en
+                    hud_out_lvl   = out_lvl_en
+
                 color_map = {"Smooth": (0, 255, 0), "Moderate": (0, 255, 255), "Congested": (0, 165, 255), "Gridlock": (0, 0, 255)}
-                text_color = color_map.get(lvl_en, (255, 255, 255))
-                cv2.putText(annotated_frame, f"Traffic: {lvl_en}", (20, 170), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, text_color, 3)
+                cv2.putText(annotated_frame, f"{hud_in_label}: {hud_in_lvl}",   (20, 170),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.85, color_map.get(hud_in_lvl,  (255,255,255)), 2)
+                cv2.putText(annotated_frame, f"{hud_out_label}: {hud_out_lvl}", (20, 210),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.85, color_map.get(hud_out_lvl, (255,255,255)), 2)
                 
                 # Store timeline analytics data point
                 st.session_state.flow_history.append({
@@ -648,20 +819,23 @@ if video_path is not None:
                     "Density Score": round(rolling_density, 2)
                 })
                 
-                # Real-time UI updates
-                inbound_metric.metric("Inbound Count (Left Lanes)", st.session_state.inbound_count)
-                outbound_metric.metric("Outbound Count (Right Lanes)", st.session_state.outbound_count)
-                traffic_level_metric.metric("Current Traffic Level", f"{emoji} {lvl_th}")
-                # อัปเดต density แยกฝั่ง
+                # Real-time UI updates (labels adjust based on swap_directions)
+                inbound_metric.metric(f"{left_emoji} {left_label} Count (Left Lanes)", st.session_state.inbound_count)
+                outbound_metric.metric(f"{right_emoji} {right_label} Count (Right Lanes)", st.session_state.outbound_count)
+                traffic_level_metric.metric("Current Traffic Level (Overall)", f"{emoji} {lvl_th}")
+
+                # อัปเดต density card — แสดงระดับการจราจรแยกขาเข้า/ขาออก
+                _, _in_emoji,  _in_lvl_th  = get_traffic_level(rolling_inbound_density,  stall_ratio)
+                _, _out_emoji, _out_lvl_th = get_traffic_level(rolling_outbound_density, stall_ratio)
                 inbound_density_metric.metric(
-                    "🔵 Inbound Density (ขาเข้า)",
-                    f"{rolling_inbound_density:.1f} คัน",
-                    help=f"จำนวนรถขาเข้าที่อยู่บนจอเฉลี่ย {WINDOW} เฟรมล่าสุด"
+                    f"{left_emoji} {left_label} Traffic Level",
+                    f"{_in_emoji} {_in_lvl_th}",
+                    help=f"ระดับการจราจรฝั่ง{left_label} (rolling avg {WINDOW} เฟรม)"
                 )
                 outbound_density_metric.metric(
-                    "🟠 Outbound Density (ขาออก)",
-                    f"{rolling_outbound_density:.1f} คัน",
-                    help=f"จำนวนรถขาออกที่อยู่บนจอเฉลี่ย {WINDOW} เฟรมล่าสุด"
+                    f"{right_emoji} {right_label} Traffic Level",
+                    f"{_out_emoji} {_out_lvl_th}",
+                    help=f"ระดับการจราจรฝั่ง{right_label} (rolling avg {WINDOW} เฟรม)"
                 )
                 
                 # Push BGR -> RGB color converted frames live to Streamlit
