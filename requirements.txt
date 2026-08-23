@@ -5,3 +5,7 @@ pandas
 torch
 torchvision
 lapx
+fastapi
+uvicorn[standard]
+websockets
+python-multipart

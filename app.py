@@ -167,10 +167,14 @@ source_type = st.sidebar.radio(
 
 video_path = None
 if source_type == "Upload Custom Video File":
-    uploaded_file = st.sidebar.file_uploader("Upload Traffic Video Clip", type=["mp4", "mov", "avi"])
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Traffic Video Clip", 
+        type=["mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv", "ts", "3gp"]
+    )
     if uploaded_file is not None:
-        # Save to temporary file for OpenCV access
-        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        # Save to temporary file with original file extension for OpenCV access
+        ext = os.path.splitext(uploaded_file.name)[1]
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         tfile.write(uploaded_file.read())
         video_path = tfile.name
 else:

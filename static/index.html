@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KU SRC Smart Traffic WebSocket Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Chart.js for smooth live telemetry plotting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Top Navbar -->
+        <header class="navbar">
+            <div class="brand">
+                <span class="brand-icon">🚗</span>
+                <div>
+                    <h1 class="brand-title">KU SRC Smart Traffic Dashboard</h1>
+                    <p class="brand-subtitle">Real-time WebSocket Video Stream &amp; YOLO AI Analytics (Zero-Lag &amp; Anti-Duplicate API)</p>
+                </div>
+            </div>
+            <div class="navbar-actions">
+                <div class="ws-status" id="wsStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting WebSocket...</span>
+                </div>
+                <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Dark/Light Mode">🌙</button>
+            </div>
+        </header>
+
+        <!-- Main Layout Grid -->
+        <div class="main-layout">
+            <!-- Left Sidebar Controls -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2>⚙️ Control Panel</h2>
+                </div>
+
+                <!-- 1. Video Source Section -->
+                <div class="control-card">
+                    <label class="section-label">1. Video Source</label>
+                    <select id="videoSelect" class="form-control">
+                        <option value="">Loading videos...</option>
+                    </select>
+
+                    <div class="upload-box mt-2">
+                        <label for="videoUploadInput" class="upload-btn">
+                            📁 Upload Video Clip (.mov, .mp4, .avi, .mkv, etc.)
+                        </label>
+                        <input type="file" id="videoUploadInput" accept="video/*,.mov,.MOV,.mp4,.MP4,.avi,.AVI,.mkv,.MKV,.webm,.WEBM,.m4v,.M4V,.wmv,.WMV,.flv,.ts,.3gp" style="display:none;">
+                        <span id="uploadProgressText" class="upload-status"></span>
+                    </div>
+                </div>
+
+                <!-- 2. AI Model & Classes Section -->
+                <div class="control-card">
+                    <label class="section-label">2. AI Model Configuration</label>
+                    <select id="modelSelect" class="form-control">
+                        <option value="best.pt">🎯 Fine-Tuned Model (best.pt)</option>
+                    </select>
+                    
+                    <div class="input-row mt-2">
+                        <label for="confSlider">Confidence Threshold: <span id="confVal" class="badge">0.25</span></label>
+                        <input type="range" id="confSlider" min="0.10" max="1.00" step="0.05" value="0.25" class="slider">
+                    </div>
+
+                    <!-- Target Classes Multi-Check -->
+                    <div class="mt-2">
+                        <label class="section-sublabel">Detect &amp; Count Classes:</label>
+                        <div class="checkbox-grid">
+                            <label class="check-item"><input type="checkbox" class="class-check" value="Car" checked> Car</label>
+                            <label class="check-item"><input type="checkbox" class="class-check" value="Motorcycle" checked> Motorcycle</label>
+                            <label class="check-item"><input type="checkbox" class="class-check" value="Bus" checked> Bus</label>
+                            <label class="check-item"><input type="checkbox" class="class-check" value="Truck" checked> Truck</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Performance & Resolution Tuning -->
+                <div class="control-card">
+                    <label class="section-label">3. Performance Tuning</label>
+                    
+                    <!-- Inference Resolution (640 vs 1280) -->
+                    <div class="input-row">
+                        <label for="imgSizeSelect">Inference Resolution (Image Size):</label>
+                        <select id="imgSizeSelect" class="form-control">
+                            <option value="640" selected>640 (Standard / Fast)</option>
+                            <option value="1280">1280 (High Precision / Distant Objects)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-row mt-2">
+                        <label for="deviceSelect">Processing Engine:</label>
+                        <select id="deviceSelect" class="form-control">
+                            <option value="cpu">CPU</option>
+                            <option value="cuda">CUDA GPU</option>
+                        </select>
+                    </div>
+
+                    <div class="input-row mt-2">
+                        <label for="frameSkipSlider">Frame Skip Rate: <span id="skipVal" class="badge">2</span></label>
+                        <input type="range" id="frameSkipSlider" min="1" max="10" step="1" value="2" class="slider">
+                    </div>
+                </div>
+
+                <!-- 4. Detection Boundary Calibration -->
+                <div class="control-card">
+                    <label class="section-label">4. Line Calibration &amp; Direction</label>
+                    <div class="input-row">
+                        <label for="lineYSlider">Counting Line Height: <span id="lineYVal" class="badge">50%</span></label>
+                        <input type="range" id="lineYSlider" min="0.1" max="0.9" step="0.05" value="0.50" class="slider">
+                    </div>
+                    <div class="input-row mt-2">
+                        <label for="midXSlider">Lane Divider (Middle): <span id="midXVal" class="badge">45%</span></label>
+                        <input type="range" id="midXSlider" min="0.1" max="0.9" step="0.05" value="0.45" class="slider">
+                    </div>
+                    <div class="toggle-row mt-2">
+                        <label class="switch">
+                            <input type="checkbox" id="swapDirToggle">
+                            <span class="slider-round"></span>
+                        </label>
+                        <span class="toggle-label" id="swapLabel">➡️ Left = Inbound | Right = Outbound</span>
+                    </div>
+                </div>
+
+                <!-- 5. Filming Time Configuration -->
+                <div class="control-card">
+                    <label class="section-label">5. Filming Start Time</label>
+                    <div class="time-inputs">
+                        <input type="date" id="filmingDate" class="form-control">
+                        <input type="time" id="filmingTime" value="08:30" class="form-control">
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button id="startBtn" class="btn btn-primary">▶️ Start Live Stream</button>
+                    <button id="pauseBtn" class="btn btn-secondary" disabled>⏸️ Pause</button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>⏹️ Stop</button>
+                </div>
+            </aside>
+
+            <!-- Center Content Area -->
+            <main class="content-area">
+                <!-- Top Key Metrics Cards -->
+                <section class="metrics-grid">
+                    <div class="metric-card metric-inbound">
+                        <div class="metric-header">
+                            <span class="metric-icon">🔵</span>
+                            <span class="metric-label" id="inboundCardTitle">Inbound Count</span>
+                        </div>
+                        <div class="metric-value" id="inboundMetric">0</div>
+                        <div class="metric-sub" id="inboundDensity">Density: 0.0</div>
+                    </div>
+
+                    <div class="metric-card metric-outbound">
+                        <div class="metric-header">
+                            <span class="metric-icon">🟠</span>
+                            <span class="metric-label" id="outboundCardTitle">Outbound Count</span>
+                        </div>
+                        <div class="metric-value" id="outboundMetric">0</div>
+                        <div class="metric-sub" id="outboundDensity">Density: 0.0</div>
+                    </div>
+
+                    <div class="metric-card metric-traffic">
+                        <div class="metric-header">
+                            <span class="metric-icon" id="trafficLevelIcon">🟢</span>
+                            <span class="metric-label">Current Traffic Level</span>
+                        </div>
+                        <div class="metric-value traffic-badge" id="trafficLevelMetric">Smooth</div>
+                        <div class="metric-sub" id="realTimeClock">Clock: --:--:--</div>
+                    </div>
+
+                    <div class="metric-card metric-total">
+                        <div class="metric-header">
+                            <span class="metric-icon">📊</span>
+                            <span class="metric-label">Total Detected</span>
+                        </div>
+                        <div class="metric-value" id="totalMetric">0</div>
+                        <div class="metric-sub" id="stallRatioMetric">Stall: 0%</div>
+                    </div>
+                </section>
+
+                <!-- Video Viewport and Live Charts Row -->
+                <section class="stream-analytics-row">
+                    <!-- Live Video Viewport -->
+                    <div class="video-container">
+                        <div class="video-header">
+                            <span class="video-title">🎥 Live WebSocket Video Stream</span>
+                            <div class="video-badges">
+                                <span class="badge badge-fps" id="fpsBadge">FPS: 0.0</span>
+                                <span class="badge badge-progress" id="progressBadge">0%</span>
+                            </div>
+                        </div>
+                        <div class="video-wrapper">
+                            <img id="videoStreamImg" alt="Video Stream" class="video-canvas">
+                            <div class="stream-overlay" id="streamOverlay">
+                                <div class="overlay-msg">
+                                    <span class="overlay-icon">🚦</span>
+                                    <p>Select a video and click <strong>Start Live Stream</strong> to begin AI analysis.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Progress Bar -->
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Right Live Charts -->
+                    <div class="charts-container">
+                        <div class="chart-card">
+                            <h3>📈 Cumulative Traffic Timeline</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="timelineChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <h3>🚗 Vehicle Class Breakdown</h3>
+                            <div class="chart-wrapper">
+                                <canvas id="classChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Post-Analysis Summary Section -->
+                <section class="summary-section" id="summarySection" style="display: none;">
+                    <div class="summary-card">
+                        <div class="summary-header">
+                            <h3>📊 Traffic Congestion Summary by Time (ตารางสรุปสภาพการจราจร)</h3>
+                            <button id="downloadCsvBtn" class="btn btn-success">📥 Download Detailed CSV Log</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="summary-table" id="summaryTable">
+                                <thead>
+                                    <tr>
+                                        <th>ช่วงเวลา (Time)</th>
+                                        <th>ความหนาแน่นเฉลี่ย (Avg Vehicles)</th>
+                                        <th>ระดับการจราจร (Traffic Level)</th>
+                                        <th>รถผ่านขาเข้า (Inbound Flow)</th>
+                                        <th>รถผ่านขาออก (Outbound Flow)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="summaryTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Main JavaScript Logic -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

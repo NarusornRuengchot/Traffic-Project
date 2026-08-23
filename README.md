@@ -71,12 +71,18 @@ Since the sample video (`KUSRC_Traffic.MOV`) is very large (~201MB), it is ignor
 
 You can choose to run the Web Dashboard or the Desktop Visualizer. First, make sure your virtual environment is active:
 
+### ⚡ Run the Fast WebSocket Dashboard (Recommended - Zero Lag & Anti-Duplicate)
+Runs the high-performance FastAPI WebSocket streaming server and modern real-time Web Dashboard (at `http://localhost:8000`):
+```bash
+python server.py
+```
+> **Features:** Full-duplex WebSocket stream, frame-drop anti-lag buffer, debounced controls, dynamic model switching (`best.pt` / YOLOv11 / YOLOv8), and real-time Chart.js analytics.
+
 ### Run the Streamlit Web Dashboard (Local Host Server)
-Runs a local web server (usually at `http://localhost:8501`) with full metrics, graphs, and control panels.
+Runs a local Streamlit server (usually at `http://localhost:8501`) with full metrics, graphs, and control panels:
 ```bash
 python -m streamlit run app.py
 ```
-> **Note:** The first time you run this, YOLO will automatically download the model weights (`yolov11n.pt`) from the internet.
 
 ### Run the OpenCV Desktop Visualizer
 Runs the lightweight desktop script that displays the raw video frames with object-tracking bounding boxes directly in a desktop window:
