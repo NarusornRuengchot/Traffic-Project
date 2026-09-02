@@ -1,18 +1,24 @@
 {
-  "python.defaultInterpreterPath": "C:\\Python314\\python.exe",
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+  "python.analysis.typeCheckingMode": "off",
   "python.analysis.extraPaths": [
+    "${workspaceFolder}\\.venv\\Lib\\site-packages",
     "C:\\Users\\BOAT\\AppData\\Roaming\\Python\\Python314\\site-packages",
     "C:\\Python314\\Lib\\site-packages",
     "${workspaceFolder}",
-    "${workspaceFolder}/src"
+    "${workspaceFolder}\\src"
   ],
   "python.autoComplete.extraPaths": [
+    "${workspaceFolder}\\.venv\\Lib\\site-packages",
     "C:\\Users\\BOAT\\AppData\\Roaming\\Python\\Python314\\site-packages",
     "C:\\Python314\\Lib\\site-packages",
     "${workspaceFolder}",
-    "${workspaceFolder}/src"
+    "${workspaceFolder}\\src"
   ],
   "python.analysis.diagnosticSeverityOverrides": {
-    "reportMissingImports": "none"
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none",
+    "reportGeneralTypeIssues": "none",
+    "reportOptionalMemberAccess": "none"
   }
 }

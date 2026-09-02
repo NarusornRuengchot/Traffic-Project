@@ -16,12 +16,20 @@ export function ControlPanel({
     async function loadResources() {
       try {
         const vidData = await api.getVideos();
-        if (vidData && vidData.videos) {
+        if (vidData && vidData.videos && vidData.videos.length > 0) {
           setVideos(vidData.videos);
+          // If current video_path is empty or not in videos, select first available video
+          const exists = vidData.videos.some((v) => v.path === config.video_path);
+          if (!exists) {
+            onChangeConfig('video_path', vidData.videos[0].path);
+          }
         }
         const modelData = await api.getModels();
-        if (modelData && modelData.models) {
+        if (modelData && modelData.models && modelData.models.length > 0) {
           setModels(modelData.models);
+          if (!config.model_name) {
+            onChangeConfig('model_name', modelData.models[0].name);
+          }
         }
       } catch (err) {
         console.error('Failed to load initial resources', err);
@@ -29,6 +37,7 @@ export function ControlPanel({
     }
     loadResources();
   }, []);
+
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];

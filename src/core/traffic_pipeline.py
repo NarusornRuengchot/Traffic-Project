@@ -19,11 +19,12 @@ class TrafficPipeline:
     """
     def __init__(
         self,
-        model_name: str = "best.pt",
+        model_name: str = "yolo11n.pt",
         conf_threshold: float = 0.25,
-        img_size: int = 640,
+        img_size: int = 480,
         device: str = "cpu"
     ):
+
         self.detector = VehicleDetector(
             model_name=model_name,
             conf_threshold=conf_threshold,

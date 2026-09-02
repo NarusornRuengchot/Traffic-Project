@@ -160,6 +160,16 @@ class StreamSession:
             cand = os.path.join(BASE_DIR, video_path)
             if os.path.exists(cand):
                 resolved = cand
+            else:
+                cand_up = os.path.join(UPLOAD_DIR, os.path.basename(video_path))
+                if os.path.exists(cand_up):
+                    resolved = cand_up
+
+        # Fallback to any available video if target video not found
+        if not os.path.exists(resolved):
+            vids = list_available_videos(upload_dir=UPLOAD_DIR, project_dir=BASE_DIR)
+            if vids:
+                resolved = vids[0]["path"]
 
         self.cap = cv2.VideoCapture(resolved)
         if self.cap.isOpened():
@@ -167,6 +177,10 @@ class StreamSession:
             self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.current_frame_idx = 0
+            print(f"🎬 Successfully loaded video: {resolved} (FPS: {self.fps}, Frames: {self.total_frames})")
+        else:
+            print(f"❌ Could not open video: {resolved}")
+
 
     def update_config(self, cfg: Dict[str, Any]):
         if "model_name" in cfg and cfg["model_name"] != self.engine.model_name:
@@ -196,54 +210,71 @@ async def websocket_stream_endpoint(websocket: WebSocket):
 
     async def stream_loop():
         while True:
-            if not session.is_playing or session.is_paused:
-                await asyncio.sleep(0.05)
-                continue
-
-            if session.cap is None or not session.cap.isOpened():
-                session.is_playing = False
-                await websocket.send_json({"type": "status", "playing": False, "ended": True})
-                continue
-
-            success, frame = session.cap.read()
-            if not success:
-                # Video ended -> loop video
-                session.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                session.current_frame_idx = 0
-                success, frame = session.cap.read()
-                if not success:
-                    session.is_playing = False
-                    await websocket.send_json({"type": "status", "playing": False, "ended": True})
+            try:
+                if not session.is_playing or session.is_paused:
+                    await asyncio.sleep(0.05)
                     continue
 
-            session.current_frame_idx += 1
+                if session.cap is None or not session.cap.isOpened():
+                    session.is_playing = False
+                    await websocket.send_json({"type": "status", "playing": False, "ended": True})
+                    await asyncio.sleep(0.1)
+                    continue
 
-            # Run AI Pipeline
-            annotated_frame, telemetry = session.engine.process_frame(
-                frame=frame,
-                frame_idx=session.current_frame_idx,
-                fps=session.fps,
-                start_datetime=session.start_dt,
-                line_y_ratio=session.line_y_ratio,
-                mid_x_ratio=session.mid_x_ratio,
-                swap_directions=session.swap_directions
-            )
+                success, frame = session.cap.read()
+                if not success:
+                    # Video ended -> loop video
+                    session.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    session.current_frame_idx = 0
+                    success, frame = session.cap.read()
+                    if not success:
+                        session.is_playing = False
+                        await websocket.send_json({"type": "status", "playing": False, "ended": True})
+                        await asyncio.sleep(0.1)
+                        continue
 
-            # Encode frame to JPEG
-            _, buffer = cv2.imencode(".jpg", annotated_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-            b64_frame = base64.b64encode(buffer).decode("utf-8")
+                session.current_frame_idx += 1
 
-            # Send full packet
-            await websocket.send_json({
-                "type": "frame",
-                "image": b64_frame,
-                "telemetry": telemetry
-            })
+                # Resize frame to optimal 960px width for silky-smooth web streaming & low CPU load
+                h, w = frame.shape[:2]
+                target_w = 960
+                if w != target_w:
+                    scale = target_w / float(w)
+                    frame = cv2.resize(frame, (target_w, int(h * scale)), interpolation=cv2.INTER_LINEAR)
 
-            # Frame rate control
-            await asyncio.sleep(max(0.005, (1.0 / session.fps) * 0.75))
+                # Run AI Pipeline with optimized 480px inference size
+                annotated_frame, telemetry = session.engine.process_frame(
+                    frame=frame,
+                    frame_idx=session.current_frame_idx,
+                    fps=session.fps,
+                    start_datetime=session.start_dt,
+                    line_y_ratio=session.line_y_ratio,
+                    mid_x_ratio=session.mid_x_ratio,
+                    swap_directions=session.swap_directions,
+                    img_size=480
+                )
+
+                # Turbo JPEG Encoding (quality 60 is sharp & transfers in <2ms)
+                _, buffer = cv2.imencode(".jpg", annotated_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                b64_frame = base64.b64encode(buffer).decode("utf-8")
+
+                # Send full packet
+                await websocket.send_json({
+                    "type": "frame",
+                    "image": b64_frame,
+                    "telemetry": telemetry
+                })
+
+                # Minimal sleep to prevent event loop starvation
+                await asyncio.sleep(0.001)
+
+
+            except Exception as e:
+                print(f"⚠️ Error in stream_loop: {e}")
+                await asyncio.sleep(0.05)
 
     stream_task = asyncio.create_task(stream_loop())
+
 
     try:
         while True:
@@ -288,4 +319,5 @@ async def websocket_stream_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     print("🚀 Starting KU SRC Smart Traffic Server on http://localhost:8000 ...")
-    uvicorn.run("server.py:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

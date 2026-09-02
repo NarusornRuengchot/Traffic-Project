@@ -16,9 +16,10 @@ export default function App() {
 
   // Calibration and Stream Settings
   const [config, setConfig] = useState({
-    video_path: 'KUSRC_Traffic.mov',
-    model_name: 'best.pt',
+    video_path: 'IMG_1357.MOV',
+    model_name: 'yolo11n.pt',
     conf_threshold: 0.25,
+
     line_y_ratio: 0.50,
     mid_x_ratio: 0.45,
     swap_directions: false,
