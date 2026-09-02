@@ -1,0 +1,36 @@
+# Git & Version Control
+.git
+.gitignore
+.gitattributes
+.devcontainer
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# Node & Frontend Build
+frontend/node_modules/
+frontend/dist/
+frontend/.oxlintrc.json
+
+# Large Raw Video & Training Artifacts (Mount via volume if needed)
+*.MOV
+*.mov
+*.mp4
+*.avi
+runs/
+dataset/
+dataset_yolo/
+vehicles-coco-2/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp

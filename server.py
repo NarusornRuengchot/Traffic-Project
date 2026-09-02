@@ -7,17 +7,20 @@ import shutil
 import tempfile
 import time
 from typing import Dict, Any, Optional, List
+import io
 
 import cv2
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from ai_engine import AITrafficEngine, get_traffic_level
+from src.core.traffic_pipeline import TrafficPipeline
+from src.core.analytics import evaluate_traffic_level
+from src.utils.file_helper import resolve_model_path, list_available_models, list_available_videos, SUPPORTED_VIDEO_EXTENSIONS
 
-app = FastAPI(title="KU SRC Smart Traffic WebSocket Service", version="2.1.0")
+app = FastAPI(title="KU SRC Smart Traffic Dashboard API", version="2.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,330 +30,262 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-os.makedirs(STATIC_DIR, exist_ok=True)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-DEFAULT_MODEL = "best.pt" if os.path.exists("best.pt") else "yolov11n.pt"
-global_engine = AITrafficEngine(model_name=DEFAULT_MODEL)
-
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Mount frontend static assets
+if os.path.exists(os.path.join(FRONTEND_DIST, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+DEFAULT_MODEL = "best.pt" if os.path.exists("best.pt") else "yolov11n.pt"
+global_engine = TrafficPipeline(model_name=DEFAULT_MODEL)
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return HTMLResponse("<h2>KU SRC Traffic Dashboard is loading...</h2>")
-
+    react_index = os.path.join(FRONTEND_DIST, "index.html")
+    if os.path.exists(react_index):
+        return FileResponse(react_index)
+    static_index = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(static_index):
+        return FileResponse(static_index)
+    return HTMLResponse("<h2>KU SRC Traffic Dashboard is starting...</h2>")
 
 @app.get("/api/models")
-async def list_models():
+async def get_models():
     return {
-        "models": AITrafficEngine.get_available_models(),
-        "devices": AITrafficEngine.get_available_devices(),
+        "models": TrafficPipeline.get_available_models(),
+        "devices": TrafficPipeline.get_available_devices(),
         "current_model": global_engine.model_name
     }
 
-
-SUPPORTED_VIDEO_EXTENSIONS = (
-    ".mov", ".mp4", ".avi", ".mkv", ".webm",
-    ".m4v", ".wmv", ".flv", ".ts", ".3gp"
-)
-
-
 @app.get("/api/videos")
-async def list_videos():
-    videos = []
-    seen_paths = set()
-
-    # 1. Scan root project folder for all video files (.mov, .mp4, etc.)
-    for f in sorted(os.listdir(".")):
-        if os.path.isfile(f) and f.lower().endswith(SUPPORTED_VIDEO_EXTENSIONS):
-            is_sample = "kusrc" in f.lower()
-            label = f"KU SRC Sample Video ({f})" if is_sample else f"📹 Project Video: {f}"
-            videos.append({
-                "id": f,
-                "name": label,
-                "path": f,
-                "type": "sample" if is_sample else "local"
-            })
-            seen_paths.add(os.path.abspath(f))
-
-    # 2. Scan uploaded video files
-    if os.path.exists(UPLOAD_DIR):
-        for f in sorted(os.listdir(UPLOAD_DIR)):
-            full_path = os.path.join(UPLOAD_DIR, f)
-            if os.path.isfile(full_path) and f.lower().endswith(SUPPORTED_VIDEO_EXTENSIONS):
-                if os.path.abspath(full_path) not in seen_paths:
-                    videos.append({
-                        "id": f,
-                        "name": f"📁 Uploaded: {f}",
-                        "path": full_path,
-                        "type": "uploaded"
-                    })
-                    seen_paths.add(os.path.abspath(full_path))
-
-    return {"videos": videos}
-
+async def get_videos():
+    return {"videos": list_available_videos(upload_dir=UPLOAD_DIR, project_dir=BASE_DIR)}
 
 @app.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)):
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file selected")
-        
-    safe_name = os.path.basename(file.filename)
-    dest_path = os.path.join(UPLOAD_DIR, safe_name)
-    
+    filename = file.filename or f"uploaded_{int(time.time())}.mp4"
+    clean_name = os.path.basename(filename)
+    dest_path = os.path.join(UPLOAD_DIR, clean_name)
+
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
-    return {"status": "success", "filename": safe_name, "path": dest_path}
 
-
-@app.get("/api/video-preview")
-async def get_calibration_preview(
-    path: str,
-    line_y: float = Query(0.50),
-    mid_x: float = Query(0.45),
-    swap: bool = Query(False)
-):
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Video not found")
-        
-    info = AITrafficEngine.get_video_info(path)
-    if not info:
-        raise HTTPException(status_code=400, detail="Could not read video")
-        
-    first_frame = info.pop("first_frame")
-    preview = AITrafficEngine.generate_calibration_preview(
-        first_frame,
-        line_y_ratio=line_y,
-        mid_x_ratio=mid_x,
-        swap_directions=swap
-    )
-    
-    _, buffer = cv2.imencode('.jpg', preview, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    preview_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode("utf-8")
-    
-    info["preview"] = preview_base64
-    return info
-
-
-@app.websocket("/ws/traffic")
-async def websocket_traffic_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    
-    session_engine = AITrafficEngine(model_name=global_engine.model_name)
-    is_running = False
-    is_paused = False
-    run_lock = asyncio.Lock()
-    stream_task: Optional[asyncio.Task] = None
-    
-    config = {
-        "video_path": "KUSRC_Traffic.MOV" if os.path.exists("KUSRC_Traffic.MOV") else "KUSRC_Traffic.mov",
-        "model_name": session_engine.model_name,
-        "line_y_ratio": 0.50,
-        "mid_x_ratio": 0.45,
-        "swap_directions": False,
-        "conf_threshold": 0.25,
-        "frame_skip": 2,
-        "img_size": 640,
-        "device": "cpu",
-        "target_classes": ["Car", "Motorcycle", "Bus", "Truck"],
-        "start_datetime_str": datetime.datetime.now().strftime("%Y-%m-%d 08:30:00"),
-        "jpeg_quality": 75
+    return {
+        "success": True,
+        "video": {
+            "id": clean_name,
+            "name": f"📁 Uploaded: {clean_name}",
+            "path": dest_path,
+            "type": "uploaded"
+        }
     }
 
-    async def stream_worker():
-        nonlocal is_running, is_paused
-        
-        video_path = config.get("video_path", "")
-        if not os.path.exists(video_path):
-            await websocket.send_json({"type": "error", "message": f"Video file not found: {video_path}"})
-            is_running = False
-            return
+@app.get("/api/calibration/preview")
+async def get_calibration_preview(
+    video_path: str = Query(..., description="Path to video file"),
+    line_y_ratio: float = Query(0.50),
+    mid_x_ratio: float = Query(0.45),
+    swap_directions: bool = Query(False)
+):
+    if not os.path.exists(video_path):
+        # Check in base dir
+        cand = os.path.join(BASE_DIR, video_path)
+        if os.path.exists(cand):
+            video_path = cand
+        else:
+            raise HTTPException(status_code=404, detail="Video file not found")
 
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            await websocket.send_json({"type": "error", "message": "Failed to open video file"})
-            is_running = False
-            return
+    v_info = TrafficPipeline.get_video_info(video_path)
+    if not v_info or v_info.get("first_frame") is None:
+        raise HTTPException(status_code=400, detail="Cannot read video first frame")
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 30.0
+    preview = TrafficPipeline.generate_calibration_preview(
+        first_frame=v_info["first_frame"],
+        line_y_ratio=line_y_ratio,
+        mid_x_ratio=mid_x_ratio,
+        swap_directions=swap_directions
+    )
 
-        try:
-            start_dt = datetime.datetime.strptime(config["start_datetime_str"], "%Y-%m-%d %H:%M:%S")
-        except Exception:
-            start_dt = datetime.datetime.now()
+    _, buffer = cv2.imencode(".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    b64 = base64.b64encode(buffer).decode("utf-8")
+    return {"preview": b64, "width": v_info["width"], "height": v_info["height"]}
 
-        session_engine.reset_state()
-        session_engine.update_target_classes(config.get("target_classes", ["Car", "Motorcycle", "Bus", "Truck"]))
-        
-        frame_idx = 0
-        last_yield_time = time.time()
-        fps_timer_start = time.time()
-        frames_processed_count = 0
-        current_fps = 0.0
-        
-        await websocket.send_json({
-            "type": "started",
-            "total_frames": total_frames,
-            "fps": fps,
-            "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S")
-        })
+@app.get("/api/export")
+async def export_data(format: str = Query("csv")):
+    if format == "summary":
+        summary = global_engine.generate_summary_table(datetime.datetime.now())
+        return {"summary": summary}
 
-        try:
-            while is_running and cap.isOpened():
-                if is_paused:
-                    await asyncio.sleep(0.1)
-                    continue
+    # CSV Export of events
+    events = global_engine.events_log
+    lines = ["Timestamp (s),Real-world Time,Vehicle ID,Type,Direction,Traffic Level"]
+    for ev in events:
+        lines.append(f"{ev.get('Timestamp (s)', '')},{ev.get('Real-world Time', '')},{ev.get('Vehicle ID', '')},{ev.get('Type', '')},{ev.get('Direction', '')},\"{ev.get('Traffic Level', '')}\"")
+    csv_str = "\n".join(lines)
+    return Response(content=csv_str, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=traffic_events.csv"})
 
-                success, frame = cap.read()
+# -------------------------------------------------------------
+# Real-Time WebSocket Streaming Session Handler
+# -------------------------------------------------------------
+class StreamSession:
+    def __init__(self, websocket: WebSocket):
+        self.ws = websocket
+        self.engine = TrafficPipeline(model_name=DEFAULT_MODEL)
+        self.is_playing = False
+        self.is_paused = False
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.video_path = ""
+        self.conf_threshold = 0.25
+        self.line_y_ratio = 0.50
+        self.mid_x_ratio = 0.45
+        self.swap_directions = False
+        self.target_classes = ["Car", "Motorcycle", "Bus", "Truck"]
+        self.start_dt = datetime.datetime.now()
+        self.fps = 30.0
+        self.total_frames = 0
+        self.current_frame_idx = 0
+
+    def load_video(self, video_path: str):
+        if self.cap is not None:
+            self.cap.release()
+
+        resolved = video_path
+        if not os.path.exists(resolved):
+            cand = os.path.join(BASE_DIR, video_path)
+            if os.path.exists(cand):
+                resolved = cand
+
+        self.cap = cv2.VideoCapture(resolved)
+        if self.cap.isOpened():
+            self.video_path = resolved
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.current_frame_idx = 0
+
+    def update_config(self, cfg: Dict[str, Any]):
+        if "model_name" in cfg and cfg["model_name"] != self.engine.model_name:
+            self.engine.load_model(cfg["model_name"])
+        if "conf_threshold" in cfg:
+            self.conf_threshold = float(cfg["conf_threshold"])
+            self.engine.detector.set_confidence(self.conf_threshold)
+        if "line_y_ratio" in cfg:
+            self.line_y_ratio = float(cfg["line_y_ratio"])
+        if "mid_x_ratio" in cfg:
+            self.mid_x_ratio = float(cfg["mid_x_ratio"])
+        if "swap_directions" in cfg:
+            self.swap_directions = bool(cfg["swap_directions"])
+        if "target_classes" in cfg:
+            self.target_classes = cfg["target_classes"]
+            self.engine.update_target_classes(self.target_classes)
+
+    def close(self):
+        self.is_playing = False
+        if self.cap is not None:
+            self.cap.release()
+
+@app.websocket("/ws/stream")
+async def websocket_stream_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    session = StreamSession(websocket)
+
+    async def stream_loop():
+        while True:
+            if not session.is_playing or session.is_paused:
+                await asyncio.sleep(0.05)
+                continue
+
+            if session.cap is None or not session.cap.isOpened():
+                session.is_playing = False
+                await websocket.send_json({"type": "status", "playing": False, "ended": True})
+                continue
+
+            success, frame = session.cap.read()
+            if not success:
+                # Video ended -> loop video
+                session.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                session.current_frame_idx = 0
+                success, frame = session.cap.read()
                 if not success:
-                    break
-
-                frame_idx += 1
-                frame_skip = max(1, int(config.get("frame_skip", 2)))
-                if frame_idx % frame_skip != 0:
+                    session.is_playing = False
+                    await websocket.send_json({"type": "status", "playing": False, "ended": True})
                     continue
 
-                frames_processed_count += 1
-                now = time.time()
-                # Compute real-time processing FPS every 5 frames
-                if now - fps_timer_start >= 0.5:
-                    current_fps = round(frames_processed_count / (now - fps_timer_start), 1)
-                    fps_timer_start = now
-                    frames_processed_count = 0
+            session.current_frame_idx += 1
 
-                # Run YOLO in worker thread
-                annotated_frame, telemetry = await asyncio.to_thread(
-                    session_engine.process_frame,
-                    frame=frame,
-                    frame_idx=frame_idx,
-                    fps=fps,
-                    start_datetime=start_dt,
-                    line_y_ratio=float(config.get("line_y_ratio", 0.50)),
-                    mid_x_ratio=float(config.get("mid_x_ratio", 0.45)),
-                    swap_directions=bool(config.get("swap_directions", False)),
-                    img_size=int(config.get("img_size", 640)),
-                    device=str(config.get("device", "cpu"))
-                )
+            # Run AI Pipeline
+            annotated_frame, telemetry = session.engine.process_frame(
+                frame=frame,
+                frame_idx=session.current_frame_idx,
+                fps=session.fps,
+                start_datetime=session.start_dt,
+                line_y_ratio=session.line_y_ratio,
+                mid_x_ratio=session.mid_x_ratio,
+                swap_directions=session.swap_directions
+            )
 
-                telemetry["frame_idx"] = frame_idx
-                telemetry["total_frames"] = total_frames
-                telemetry["progress_pct"] = round((frame_idx / total_frames) * 100, 1) if total_frames > 0 else 0.0
-                telemetry["fps"] = current_fps if current_fps > 0 else round(fps, 1)
+            # Encode frame to JPEG
+            _, buffer = cv2.imencode(".jpg", annotated_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+            b64_frame = base64.b64encode(buffer).decode("utf-8")
 
-                jpeg_quality = int(config.get("jpeg_quality", 75))
-                _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                frame_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode("utf-8")
-
-                payload = {
-                    "type": "frame",
-                    "frame": frame_base64,
-                    "telemetry": telemetry
-                }
-
-                await websocket.send_json(payload)
-
-                target_frame_time = (1.0 / fps) * frame_skip
-                elapsed = time.time() - last_yield_time
-                if elapsed < target_frame_time:
-                    await asyncio.sleep(target_frame_time - elapsed)
-                else:
-                    await asyncio.sleep(0.001)
-                last_yield_time = time.time()
-
-            summary_data = session_engine.generate_summary_table(start_dt)
+            # Send full packet
             await websocket.send_json({
-                "type": "finished",
-                "total_inbound": session_engine.inbound_count,
-                "total_outbound": session_engine.outbound_count,
-                "total_vehicles": session_engine.inbound_count + session_engine.outbound_count,
-                "class_counts": session_engine.class_counts,
-                "summary_table": summary_data,
-                "events_log": session_engine.events_log
+                "type": "frame",
+                "image": b64_frame,
+                "telemetry": telemetry
             })
 
-        except Exception as e:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        finally:
-            cap.release()
-            is_running = False
+            # Frame rate control
+            await asyncio.sleep(max(0.005, (1.0 / session.fps) * 0.75))
+
+    stream_task = asyncio.create_task(stream_loop())
 
     try:
         while True:
-            data = await websocket.receive_text()
-            msg = json.loads(data)
-            action = msg.get("action", "")
+            raw_msg = await websocket.receive_text()
+            data = json.loads(raw_msg)
+            cmd = data.get("command")
 
-            if action == "start":
-                async with run_lock:
-                    if is_running:
-                        await websocket.send_json({"type": "warning", "message": "Analysis is already running."})
-                        continue
+            if cmd == "start":
+                session.update_config(data)
+                vid = data.get("video_path", "KUSRC_Traffic.mov")
+                session.load_video(vid)
+                session.engine.reset_state()
+                session.is_playing = True
+                session.is_paused = False
+                await websocket.send_json({"type": "status", "playing": True})
 
-                    if "config" in msg:
-                        config.update(msg["config"])
+            elif cmd == "pause":
+                session.is_paused = True
+                await websocket.send_json({"type": "status", "playing": False})
 
-                    req_model = config.get("model_name", DEFAULT_MODEL)
-                    if session_engine.model_name != req_model:
-                        session_engine.load_model(req_model)
+            elif cmd == "resume":
+                session.is_paused = False
+                await websocket.send_json({"type": "status", "playing": True})
 
-                    session_engine.conf_threshold = float(config.get("conf_threshold", 0.25))
-                    session_engine.img_size = int(config.get("img_size", 640))
-                    session_engine.device = str(config.get("device", "cpu"))
-                    if "target_classes" in config:
-                        session_engine.update_target_classes(config["target_classes"])
+            elif cmd == "reset":
+                session.engine.reset_state()
+                if session.cap is not None:
+                    session.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    session.current_frame_idx = 0
+                await websocket.send_json({"type": "status", "reset": True})
 
-                    is_running = True
-                    is_paused = False
-                    stream_task = asyncio.create_task(stream_worker())
-
-            elif action == "pause":
-                is_paused = not is_paused
-                await websocket.send_json({"type": "paused", "is_paused": is_paused})
-
-            elif action == "stop":
-                is_running = False
-                if stream_task and not stream_task.done():
-                    stream_task.cancel()
-                await websocket.send_json({"type": "stopped"})
-
-            elif action == "update_config":
-                new_cfg = msg.get("config", {})
-                config.update(new_cfg)
-                if "conf_threshold" in new_cfg:
-                    session_engine.conf_threshold = float(new_cfg["conf_threshold"])
-                if "img_size" in new_cfg:
-                    session_engine.img_size = int(new_cfg["img_size"])
-                if "device" in new_cfg:
-                    session_engine.device = str(new_cfg["device"])
-                if "target_classes" in new_cfg:
-                    session_engine.update_target_classes(new_cfg["target_classes"])
-                if "model_name" in new_cfg and new_cfg["model_name"] != session_engine.model_name:
-                    session_engine.load_model(new_cfg["model_name"])
-                await websocket.send_json({"type": "config_updated", "config": config})
-
-            elif action == "ping":
-                await websocket.send_json({"type": "pong", "time": time.time()})
+            elif cmd == "update_config":
+                session.update_config(data)
 
     except WebSocketDisconnect:
-        is_running = False
-        if stream_task and not stream_task.done():
-            stream_task.cancel()
-    except Exception:
-        is_running = False
-        if stream_task and not stream_task.done():
-            stream_task.cancel()
-
+        pass
+    except Exception as e:
+        print(f"WebSocket Error: {e}")
+    finally:
+        session.close()
+        stream_task.cancel()
 
 if __name__ == "__main__":
-    print("🚀 Starting KU SRC Smart Traffic WebSocket Server on http://localhost:8000 ...")
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+    print("🚀 Starting KU SRC Smart Traffic Server on http://localhost:8000 ...")
+    uvicorn.run("server.py:app", host="0.0.0.0", port=8000, reload=False)

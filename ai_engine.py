@@ -4,33 +4,41 @@ import datetime
 import numpy as np
 import pandas as pd
 import torch
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Set
 from ultralytics import YOLO
 
 def resolve_model_path(model_name: str) -> str:
     """Find the exact model file or fallback variations."""
     if os.path.exists(model_name):
         return model_name
-        
+
+    candidates = [model_name]
     if "yolov11" in model_name:
-        alt = model_name.replace("yolov11", "yolo11")
-        if os.path.exists(alt):
-            return alt
+        candidates.append(model_name.replace("yolov11", "yolo11"))
     elif "yolo11" in model_name:
-        alt = model_name.replace("yolo11", "yolov11")
-        if os.path.exists(alt):
-            return alt
-            
+        candidates.append(model_name.replace("yolo11", "yolov11"))
+
     if "yolov8" in model_name:
-        alt = model_name.replace("yolov8", "yolo8")
-        if os.path.exists(alt):
-            return alt
+        candidates.append(model_name.replace("yolov8", "yolo8"))
     elif "yolo8" in model_name:
-        alt = model_name.replace("yolo8", "yolov8")
-        if os.path.exists(alt):
-            return alt
-            
+        candidates.append(model_name.replace("yolo8", "yolov8"))
+
+    # Search in root and models folder
+    for directory in [".", "models"]:
+        for cand in candidates:
+            target = os.path.join(directory, cand) if directory != "." else cand
+            if os.path.exists(target):
+                return target
+
+    # Fallback to any available .pt file
+    for directory in [".", "models"]:
+        if os.path.exists(directory):
+            for f in os.listdir(directory):
+                if f.endswith(".pt"):
+                    return os.path.join(directory, f) if directory != "." else f
+
     return model_name
+
 
 def get_traffic_level(density: float, stall_ratio: float = 0.0) -> Tuple[str, str, str]:
     """
@@ -38,7 +46,7 @@ def get_traffic_level(density: float, stall_ratio: float = 0.0) -> Tuple[str, st
     Returns: (Thai description, Emoji, English level name)
     """
     score = density * (1.0 + 0.2 * stall_ratio)
-    
+
     if score <= 5.0:
         return "Smooth (คล่องตัว)", "🟢", "Smooth"
     elif score <= 12.0:
@@ -48,36 +56,43 @@ def get_traffic_level(density: float, stall_ratio: float = 0.0) -> Tuple[str, st
     else:
         return "Gridlock (หนาแน่นมาก)", "🔴", "Gridlock"
 
+
 class AITrafficEngine:
-    def __init__(self, model_name: str = "best.pt", conf_threshold: float = 0.25, img_size: int = 640, device: str = "cpu"):
-        self.conf_threshold = conf_threshold
-        self.img_size = img_size
-        self.device = device
-        self.model_name = ""
-        self.model = None
-        self.class_map = {}
-        self.id_to_name = {}
-        self.selected_target_classes = ["Car", "Motorcycle", "Bus", "Truck"]
-        self.target_class_ids = []
-        
+    def __init__(
+        self,
+        model_name: str = "best.pt",
+        conf_threshold: float = 0.25,
+        img_size: int = 640,
+        device: str = "cpu"
+    ):
+        self.conf_threshold: float = conf_threshold
+        self.img_size: int = img_size
+        self.device: str = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
+        self.model_name: str = ""
+        self.model: YOLO = None  # type: ignore
+        self.class_map: Dict[str, int] = {}
+        self.id_to_name: Dict[int, str] = {}
+        self.selected_target_classes: List[str] = ["Car", "Motorcycle", "Bus", "Truck"]
+        self.target_class_ids: List[int] = []
+
         # State tracking
-        self.inbound_count = 0
-        self.outbound_count = 0
-        self.counted_ids = set()
-        self.track_history = {}
-        self.prev_positions = {}
-        self.active_history = []
-        self.inbound_active_history = []
-        self.outbound_active_history = []
-        self.class_counts = {"Car": 0, "Motorcycle": 0, "Bus": 0, "Truck": 0}
-        self.events_log = []
-        self.flow_history = []
-        self.window_size = 30
-        
+        self.inbound_count: int = 0
+        self.outbound_count: int = 0
+        self.counted_ids: Set[int] = set()
+        self.track_history: Dict[int, Tuple[int, int]] = {}
+        self.prev_positions: Dict[int, Tuple[int, int]] = {}
+        self.active_history: List[int] = []
+        self.inbound_active_history: List[int] = []
+        self.outbound_active_history: List[int] = []
+        self.class_counts: Dict[str, int] = {"Car": 0, "Motorcycle": 0, "Bus": 0, "Truck": 0}
+        self.events_log: List[Dict[str, Any]] = []
+        self.flow_history: List[Dict[str, Any]] = []
+        self.window_size: int = 30
+
         self.load_model(model_name)
 
     def load_model(self, model_name: str):
-        """Loads a YOLO model weights file and initializes class maps."""
+        """Loads a YOLO model weights file and dynamically initializes class maps from model metadata."""
         resolved = resolve_model_path(model_name)
         if not os.path.exists(resolved):
             fallback = "yolov11n.pt" if os.path.exists("yolov11n.pt") else "yolov8n.pt"
@@ -89,13 +104,37 @@ class AITrafficEngine:
         self.model_name = os.path.basename(resolved)
         self.model = YOLO(resolved)
 
-        # Setup class mappings based on model type
-        if "best.pt" in self.model_name:
-            self.class_map = {"Car": 1, "Motorcycle": 2, "Bus": 0, "Truck": 3}
-            self.id_to_name = {1: "Car", 2: "Motorcycle", 0: "Bus", 3: "Truck"}
-        else:
-            self.class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
-            self.id_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
+        # Dynamically inspect model.names from the loaded weights
+        self.class_map = {}
+        self.id_to_name = {}
+
+        model_names = getattr(self.model, "names", None)
+        if isinstance(model_names, dict):
+            for cid, cname in model_names.items():
+                name_clean = str(cname).strip().capitalize()
+                # Normalize vehicle category names
+                if name_clean.lower() in ["car", "automobile", "sedan", "suv", "van"]:
+                    std_name = "Car"
+                elif name_clean.lower() in ["motorcycle", "motorbike", "bike"]:
+                    std_name = "Motorcycle"
+                elif name_clean.lower() in ["bus"]:
+                    std_name = "Bus"
+                elif name_clean.lower() in ["truck"]:
+                    std_name = "Truck"
+                else:
+                    std_name = name_clean
+
+                self.id_to_name[int(cid)] = std_name
+                self.class_map[std_name] = int(cid)
+
+        # Fallback if names dict was incomplete
+        if not self.class_map:
+            if "best.pt" in self.model_name:
+                self.class_map = {"Car": 0, "Motorcycle": 1, "Bus": 2, "Truck": 3}
+                self.id_to_name = {0: "Car", 1: "Motorcycle", 2: "Bus", 3: "Truck"}
+            else:
+                self.class_map = {"Car": 2, "Motorcycle": 3, "Bus": 5, "Truck": 7}
+                self.id_to_name = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
 
         self.update_target_classes(self.selected_target_classes)
 
@@ -122,13 +161,21 @@ class AITrafficEngine:
     def get_available_models() -> List[Dict[str, Any]]:
         """Scans directory for available YOLO model files."""
         models = []
-        if os.path.exists("best.pt"):
-            models.append({"name": "best.pt", "label": "🎯 Fine-Tuned Model (best.pt)", "type": "finetuned"})
-            
-        for f in sorted(os.listdir(".")):
-            if f.endswith(".pt") and f != "best.pt":
-                models.append({"name": f, "label": f, "type": "standard"})
-                
+        seen = set()
+        for directory in [".", "models"]:
+            if not os.path.exists(directory):
+                continue
+            for f in sorted(os.listdir(directory)):
+                if f.endswith(".pt") and f not in seen:
+                    seen.add(f)
+                    is_best = "best" in f.lower() or "custom" in f.lower()
+                    label = f"🎯 Fine-Tuned Model ({f})" if is_best else f"⚡ YOLO Model: {f}"
+                    models.append({
+                        "name": f,
+                        "label": label,
+                        "path": os.path.join(directory, f) if directory != "." else f,
+                        "type": "finetuned" if is_best else "standard"
+                    })
         return models
 
     @staticmethod
@@ -147,11 +194,11 @@ class AITrafficEngine:
             return None
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         success, frame = cap.read()
         cap.release()
-        
+
         if success:
             return {
                 "width": width,
@@ -172,22 +219,22 @@ class AITrafficEngine:
         """Draws calibration lines and labels on the preview frame."""
         preview = first_frame.copy()
         height, width = preview.shape[:2]
-        LINE_Y = int(height * line_y_ratio)
-        MID_X = int(width * mid_x_ratio)
-        
-        inbound_start, inbound_end = (0, LINE_Y), (MID_X, LINE_Y)
-        outbound_start, outbound_end = (MID_X, LINE_Y), (width, LINE_Y)
-        
+        line_y = int(height * line_y_ratio)
+        mid_x = int(width * mid_x_ratio)
+
+        inbound_start, inbound_end = (0, line_y), (mid_x, line_y)
+        outbound_start, outbound_end = (mid_x, line_y), (width, line_y)
+
         cv2.line(preview, inbound_start, inbound_end, (255, 255, 0), 4)      # Left: Cyan
         cv2.line(preview, outbound_start, outbound_end, (0, 165, 255), 4)   # Right: Orange
-        cv2.circle(preview, (MID_X, LINE_Y), 10, (0, 0, 255), -1)           # Divider: Red dot
-        
+        cv2.circle(preview, (mid_x, line_y), 10, (0, 0, 255), -1)           # Divider: Red dot
+
         left_label = "Outbound Lane" if swap_directions else "Inbound Lane"
         right_label = "Inbound Lane" if swap_directions else "Outbound Lane"
-        
-        cv2.putText(preview, left_label, (20, LINE_Y - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        cv2.putText(preview, right_label, (MID_X + 20, LINE_Y - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-        
+
+        cv2.putText(preview, left_label, (20, max(25, line_y - 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(preview, right_label, (mid_x + 20, max(25, line_y - 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+
         return preview
 
     def process_frame(
@@ -208,17 +255,20 @@ class AITrafficEngine:
         calculates stall ratio and rolling density, and annotates the frame.
         """
         self.img_size = img_size
-        self.device = device
-        
+        self.device = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
+
         height, width = frame.shape[:2]
-        LINE_Y = int(height * line_y_ratio)
-        MID_X = int(width * mid_x_ratio)
-        
-        inbound_start, inbound_end = (0, LINE_Y), (MID_X, LINE_Y)
-        outbound_start, outbound_end = (MID_X, LINE_Y), (width, LINE_Y)
+        line_y = int(height * line_y_ratio)
+        mid_x = int(width * mid_x_ratio)
+
+        inbound_start, inbound_end = (0, line_y), (mid_x, line_y)
+        outbound_start, outbound_end = (mid_x, line_y), (width, line_y)
 
         # Run YOLO tracking
         tracker_file = tracker_cfg if os.path.exists(tracker_cfg) else "bytetrack.yaml"
+        if self.model is None:
+            self.load_model(self.model_name or "best.pt")
+
         results = self.model.track(
             frame,
             imgsz=self.img_size,
@@ -235,24 +285,37 @@ class AITrafficEngine:
         # Render counting boundary lines
         cv2.line(annotated_frame, inbound_start, inbound_end, (255, 255, 0), 3)      # Left: Cyan
         cv2.line(annotated_frame, outbound_start, outbound_end, (0, 165, 255), 3)   # Right: Orange
-        cv2.circle(annotated_frame, (MID_X, LINE_Y), 6, (0, 0, 255), -1)            # Divider: Red dot
+        cv2.circle(annotated_frame, (mid_x, line_y), 6, (0, 0, 255), -1)            # Divider: Red dot
 
-        # Calculate Active Vehicles & Stall Ratio
-        active_ids = results[0].boxes.id.int().cpu().tolist() if results[0].boxes.id is not None else []
+        # Calculate Active Vehicles & Stall Ratio safely
+        boxes_obj = getattr(results[0], "boxes", None)
+        has_boxes = False
+        active_ids: List[int] = []
+        boxes_xy: np.ndarray = np.empty((0, 4))
+        class_indices: List[int] = []
+
+        if boxes_obj is not None:
+            box_ids = getattr(boxes_obj, "id", None)
+            if box_ids is not None:
+                has_boxes = True
+                active_ids = box_ids.int().cpu().tolist()
+                boxes_xy = boxes_obj.xyxy.cpu().numpy()
+                cls_tensor = getattr(boxes_obj, "cls", None)
+                if cls_tensor is not None:
+                    class_indices = cls_tensor.int().cpu().tolist()
+
         active_count = len(active_ids)
-
         stall_count = 0
-        current_positions = {}
+        current_positions: Dict[int, Tuple[int, int]] = {}
         inbound_active = 0
         outbound_active = 0
 
-        if results[0].boxes.id is not None:
-            boxes_xy = results[0].boxes.xyxy.cpu().numpy()
+        if has_boxes:
             for bx, tid in zip(boxes_xy, active_ids):
                 cx = int((bx[0] + bx[2]) / 2)
                 cy = int((bx[1] + bx[3]) / 2)
                 current_positions[tid] = (cx, cy)
-                
+
                 # Check stall
                 if tid in self.prev_positions:
                     px, py = self.prev_positions[tid]
@@ -261,7 +324,7 @@ class AITrafficEngine:
                         stall_count += 1
 
                 # Check side density
-                if cx < MID_X:
+                if cx < mid_x:
                     inbound_active += 1
                 else:
                     outbound_active += 1
@@ -291,12 +354,9 @@ class AITrafficEngine:
         real_time_full_str = current_real_time.strftime("%Y-%m-%d %H:%M:%S")
 
         # Line crossover tracking
-        if results[0].boxes.id is not None:
-            boxes = results[0].boxes.xyxy.cpu().numpy()
-            track_ids = results[0].boxes.id.int().cpu().tolist()
-            classes = results[0].boxes.cls.int().cpu().tolist()
-
-            for box, track_id, class_idx in zip(boxes, track_ids, classes):
+        new_events = []
+        if has_boxes and class_indices:
+            for box, track_id, class_idx in zip(boxes_xy, active_ids, class_indices):
                 x1, y1, x2, y2 = box
                 center_x = int((x1 + x2) / 2)
                 center_y = int((y1 + y2) / 2)
@@ -304,19 +364,19 @@ class AITrafficEngine:
                 if track_id in self.track_history:
                     prev_x, prev_y = self.track_history[track_id]
 
-                    if (prev_y <= LINE_Y <= center_y) or (center_y <= LINE_Y <= prev_y):
+                    if (prev_y <= line_y <= center_y) or (center_y <= line_y <= prev_y):
                         if track_id not in self.counted_ids:
                             self.counted_ids.add(track_id)
 
                             if center_y != prev_y:
-                                cross_x = prev_x + (center_x - prev_x) * (LINE_Y - prev_y) / (center_y - prev_y)
+                                cross_x = prev_x + (center_x - prev_x) * (line_y - prev_y) / (center_y - prev_y)
                             else:
                                 cross_x = center_x
 
-                            class_name = self.id_to_name.get(class_idx, "Unknown")
+                            class_name = self.id_to_name.get(class_idx, "Car")
                             left_is_inbound = not swap_directions
 
-                            if cross_x < MID_X:
+                            if cross_x < mid_x:
                                 if left_is_inbound:
                                     self.inbound_count += 1
                                     direction = "Inbound"
@@ -335,15 +395,19 @@ class AITrafficEngine:
 
                             if class_name in self.class_counts:
                                 self.class_counts[class_name] += 1
+                            else:
+                                self.class_counts[class_name] = 1
 
-                            self.events_log.append({
+                            event_data = {
                                 "Timestamp (s)": round(timestamp_sec, 2),
                                 "Real-world Time": real_time_full_str,
                                 "Vehicle ID": track_id,
                                 "Type": class_name,
                                 "Direction": direction,
                                 "Traffic Level": f"{emoji} {lvl_th}"
-                            })
+                            }
+                            self.events_log.append(event_data)
+                            new_events.append(event_data)
 
                 self.track_history[track_id] = (center_x, center_y)
 
@@ -376,7 +440,8 @@ class AITrafficEngine:
             "traffic_level_th": lvl_th,
             "traffic_level_en": lvl_en,
             "traffic_level_emoji": emoji,
-            "class_counts": self.class_counts.copy()
+            "class_counts": self.class_counts.copy(),
+            "new_events": new_events
         }
 
         self.flow_history.append(telemetry)
@@ -386,7 +451,7 @@ class AITrafficEngine:
         """Generates 10-second grouped interval summary data."""
         if not self.flow_history:
             return []
-            
+
         df = pd.DataFrame(self.flow_history)
         if "time_sec" not in df.columns or "active_vehicles" not in df.columns:
             return []
