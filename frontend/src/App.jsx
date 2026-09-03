@@ -6,11 +6,13 @@ import { ControlPanel } from './components/ControlPanel';
 import { VehicleBreakdown } from './components/VehicleBreakdown';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { EventLogTable } from './components/EventLogTable';
+import { HistoryReport } from './components/HistoryReport';
 import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
 import { api } from './services/api';
 
 export default function App() {
   const [theme, setTheme] = useState('dark');
+  const [activeTab, setActiveTab] = useState('live');
   const [showCalibration, setShowCalibration] = useState(false);
   const [restCalibrationPreview, setRestCalibrationPreview] = useState(null);
   const abortControllerRef = React.useRef(null);
@@ -131,7 +133,7 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px' }}>
-      {/* Top Header */}
+      {/* Top Header with Tab Switcher */}
       <Header
         isConnected={isConnected}
         isPlaying={isPlaying}
@@ -139,87 +141,96 @@ export default function App() {
         fps={fps}
         theme={theme}
         onToggleTheme={toggleTheme}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
       />
 
-      {/* KPI Metric Summary Cards */}
-      <MetricCards telemetry={telemetry} />
+      {/* Conditional Rendering: Live Monitoring vs Historical Reports */}
+      {activeTab === 'reports' ? (
+        <HistoryReport />
+      ) : (
+        <>
+          {/* KPI Metric Summary Cards */}
+          <MetricCards telemetry={telemetry} />
 
-      {/* Main Grid: Left Control Panel, Center Video, Right Analytics */}
-      <div className="dashboard-grid">
-        {/* Left Column: Control Panel & Settings */}
-        <div>
-          <ControlPanel
-            config={config}
-            onChangeConfig={handleConfigChange}
-            onToggleCalibrationPreview={handleToggleCalibration}
-            showCalibration={showCalibration}
-            modelStatus={modelStatus}
-            testCctv={testCctv}
-            cctvTestResult={cctvTestResult}
-            setCctvTestResult={setCctvTestResult}
-          />
-        </div>
-
-        {/* Center Column: Video Stream & Event Logs */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Connection Error Banner */}
-          {streamError && (
-            <div style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
-              borderRadius: '10px',
-              padding: '14px 18px',
-              color: '#EF4444',
-              fontSize: '0.85rem',
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: '12px',
-              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.15)',
-              whiteSpace: 'pre-wrap'
-            }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: '700', fontSize: '0.9rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>⚠️ ไม่สามารถเปิดสัญญาณกล้อง CCTV / แหล่งภาพได้</span>
-                </div>
-                <div style={{ lineHeight: '1.5', opacity: 0.95 }}>{streamError}</div>
-              </div>
-              <button
-                type="button"
-                onClick={clearStreamError}
-                style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '1.2rem', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
-                title="ปิดข้อความแจ้งเตือน"
-              >
-                ✕
-              </button>
+          {/* Main Grid: Left Control Panel, Center Video, Right Analytics */}
+          <div className="dashboard-grid">
+            {/* Left Column: Control Panel & Settings */}
+            <div>
+              <ControlPanel
+                config={config}
+                onChangeConfig={handleConfigChange}
+                onToggleCalibrationPreview={handleToggleCalibration}
+                showCalibration={showCalibration}
+                modelStatus={modelStatus}
+                testCctv={testCctv}
+                cctvTestResult={cctvTestResult}
+                setCctvTestResult={setCctvTestResult}
+              />
             </div>
-          )}
 
-          <VideoPlayer
-            currentFrame={currentFrame}
-            isPlaying={isPlaying}
-            isLive={isLive}
-            onStart={handleStartStream}
-            onPause={pauseStream}
-            onResume={resumeStream}
-            onReset={resetStream}
-            calibrationPreview={activeCalibrationPreview}
-            showCalibration={showCalibration}
-          />
+            {/* Center Column: Video Stream & Event Logs */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Connection Error Banner */}
+              {streamError && (
+                <div style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  borderRadius: '10px',
+                  padding: '14px 18px',
+                  color: '#EF4444',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.15)',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '700', fontSize: '0.9rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>⚠️ ไม่สามารถเปิดสัญญาณกล้อง CCTV / แหล่งภาพได้</span>
+                    </div>
+                    <div style={{ lineHeight: '1.5', opacity: 0.95 }}>{streamError}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearStreamError}
+                    style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '1.2rem', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+                    title="ปิดข้อความแจ้งเตือน"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
-          <EventLogTable eventLogs={eventLogs} />
-        </div>
+              <VideoPlayer
+                currentFrame={currentFrame}
+                isPlaying={isPlaying}
+                isLive={isLive}
+                onStart={handleStartStream}
+                onPause={pauseStream}
+                onResume={resumeStream}
+                onReset={resetStream}
+                calibrationPreview={activeCalibrationPreview}
+                showCalibration={showCalibration}
+              />
 
-        {/* Right Column: Breakdown & Real-time Charts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <VehicleBreakdown
-            classCounts={telemetry.class_counts || {}}
-            totalCount={telemetry.total_count || 0}
-          />
+              <EventLogTable eventLogs={eventLogs} />
+            </div>
 
-          <AnalyticsCharts telemetry={telemetry} isPlaying={isPlaying} />
-        </div>
-      </div>
+            {/* Right Column: Breakdown & Real-time Charts */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <VehicleBreakdown
+                classCounts={telemetry.class_counts || {}}
+                totalCount={telemetry.total_count || 0}
+              />
+
+              <AnalyticsCharts telemetry={telemetry} isPlaying={isPlaying} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

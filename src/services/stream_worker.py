@@ -244,6 +244,29 @@ class StreamWorker:
                     img_size=self.inference_size
                 )
                 telemetry["is_live"] = self.is_live
+
+                # Persist crossing events to SQLite database
+                new_events = telemetry.get("new_events")
+                if new_events:
+                    try:
+                        from src.database.db_manager import db_manager
+                        db_manager.log_events_batch(new_events, session_id=os.path.basename(str(self.video_path or "live")))
+                    except Exception as db_err:
+                        print(f"⚠️ DB log_events error: {db_err}")
+
+                # Periodic density snapshot (every ~5 seconds = 150 frames)
+                if curr_idx % 150 == 0:
+                    try:
+                        from src.database.db_manager import db_manager
+                        db_manager.log_snapshot(
+                            active_vehicles=telemetry.get("active_vehicles", 0),
+                            density_score=telemetry.get("density_score", 0.0),
+                            traffic_level=telemetry.get("traffic_level_th", "คล่องตัว"),
+                            stall_ratio=telemetry.get("stall_ratio", 0.0),
+                            session_id=os.path.basename(str(self.video_path or "live"))
+                        )
+                    except Exception as db_err:
+                        pass
             except Exception as err:
                 print(f"⚠️ Error during frame inference: {err}")
                 time.sleep(0.03)

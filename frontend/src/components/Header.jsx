@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleTheme }) {
+export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleTheme, activeTab = 'live', onSelectTab }) {
   return (
     <header className="glass-card" style={{ padding: '16px 24px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -21,14 +21,54 @@ export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleThe
           <h1 style={{ fontSize: '1.25rem', fontWeight: '800', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
             KU SRC Smart Traffic
             <span style={{ fontSize: '0.75rem', fontWeight: '600', padding: '2px 8px', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
-              v2.3 Live AI
+              v2.3 Live AI + SQLite
             </span>
           </h1>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Real-time Vehicle Detection, Tracking & Congestion Analytics
+            Real-time Vehicle Detection, Tracking, Peak Hours & Academic Analytics
           </p>
         </div>
       </div>
+
+      {/* Navigation Tab Switcher */}
+      {onSelectTab && (
+        <div style={{ display: 'flex', background: 'var(--bg-input)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
+          <button
+            type="button"
+            onClick={() => onSelectTab('live')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '700',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backgroundColor: activeTab === 'live' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'live' ? '#fff' : 'var(--text-secondary)'
+            }}
+          >
+            📹 หน้าตรวจจับสด (Live)
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectTab('reports')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '700',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backgroundColor: activeTab === 'reports' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'reports' ? '#fff' : 'var(--text-secondary)'
+            }}
+          >
+            📊 สถิติย้อนหลังและรายงาน (Reports)
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         {/* Real-time Live Camera Badge */}

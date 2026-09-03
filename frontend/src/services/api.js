@@ -38,5 +38,32 @@ export const api = {
 
   getExportUrl(format = 'csv') {
     return `${API_BASE}/api/export?format=${format}`;
+  },
+
+  async getPeakHoursReport(date = null) {
+    const url = date ? `${API_BASE}/api/reports/peak-hours?date=${date}` : `${API_BASE}/api/reports/peak-hours`;
+    const res = await fetch(url);
+    return await res.json();
+  },
+
+  async getHistoryReport({ date = null, vehicleType = 'All', direction = 'All', page = 1, limit = 50 } = {}) {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      vehicle_type: vehicleType,
+      direction: direction
+    });
+    if (date) params.append('date', date);
+    const res = await fetch(`${API_BASE}/api/reports/history?${params.toString()}`);
+    return await res.json();
+  },
+
+  async getReportDates() {
+    const res = await fetch(`${API_BASE}/api/reports/dates`);
+    return await res.json();
+  },
+
+  getReportExportUrl(date = null) {
+    return date ? `${API_BASE}/api/reports/export?date=${date}` : `${API_BASE}/api/reports/export`;
   }
 };

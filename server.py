@@ -155,6 +155,74 @@ async def export_data(format: str = Query("csv")):
         headers={"Content-Disposition": "attachment; filename=traffic_events.csv"}
     )
 
+def _clean_param(param, default=None):
+    if param is None or hasattr(param, "default") or str(param) in ("all", "All", "None", ""):
+        return default
+    return str(param)
+
+@app.get("/api/reports/peak-hours")
+async def get_peak_hours_report(date: Optional[str] = Query(None)):
+    """Returns 24h hourly volume and peak-hours analytics for the selected date."""
+    from src.database.db_manager import db_manager
+    target_date = _clean_param(date)
+    analytics = db_manager.get_peak_hours_analysis(target_date)
+    return analytics
+
+@app.get("/api/reports/history")
+async def get_history_report(
+    date: Optional[str] = Query(None),
+    vehicle_type: Optional[str] = Query("All"),
+    direction: Optional[str] = Query("All"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200)
+):
+    """Returns paginated vehicle crossing history with filters."""
+    from src.database.db_manager import db_manager
+    target_date = _clean_param(date)
+    v_type = _clean_param(vehicle_type, default="All")
+    dir_str = _clean_param(direction, default="All")
+    p = 1 if hasattr(page, "default") else int(page)
+    lim = 50 if hasattr(limit, "default") else int(limit)
+
+    offset = (p - 1) * lim
+    events, total = db_manager.get_events_history(
+        limit=lim,
+        offset=offset,
+        target_date=target_date,
+        vehicle_type=v_type,
+        direction=dir_str
+    )
+    return {
+        "events": events,
+        "total": total,
+        "page": p,
+        "limit": lim,
+        "total_pages": (total + lim - 1) // lim if total > 0 else 1
+    }
+
+@app.get("/api/reports/dates")
+async def get_report_dates():
+    """Returns list of distinct dates available in the database."""
+    from src.database.db_manager import db_manager
+    dates = db_manager.get_available_dates()
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    if today not in dates:
+        dates.insert(0, today)
+    return {"dates": dates}
+
+@app.get("/api/reports/export")
+async def export_report_csv(date: Optional[str] = Query(None)):
+    """Generates downloadable CSV export from SQLite database."""
+    from src.database.db_manager import db_manager
+    target_date = _clean_param(date)
+    csv_str = db_manager.export_csv(target_date)
+    filename = f"traffic_report_{target_date or 'all'}.csv"
+    return Response(
+        content=csv_str,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 @app.post("/api/cctv/test")
 async def test_cctv_endpoint(data: Dict[str, Any] = Body(...)):
     """Tests CCTV/RTSP connection with a fast 4-second timeout and returns connection status."""
