@@ -198,6 +198,13 @@ async def websocket_stream_endpoint(websocket: WebSocket):
 
     sender_task = asyncio.create_task(frame_sender_loop())
 
+    # Send initial status on connection
+    await websocket.send_json({
+        "type": "model_status",
+        "status": "ready",
+        "model": worker.engine.model_name
+    })
+
     try:
         while True:
             raw_msg = await websocket.receive_text()
@@ -225,8 +232,44 @@ async def websocket_stream_endpoint(websocket: WebSocket):
                 worker.reset()
                 await websocket.send_json({"type": "status", "reset": True})
 
+            elif cmd == "get_preview":
+                # Real-time calibration preview directly over WebSocket (prevents HTTP API spam)
+                vid_path = data.get("video_path", "KUSRC_Traffic.mov")
+                resolved_vid = resolve_video_path(vid_path)
+                v_info = TrafficPipeline.get_video_info(resolved_vid)
+                if v_info and v_info.get("first_frame") is not None:
+                    preview = TrafficPipeline.generate_calibration_preview(
+                        first_frame=v_info["first_frame"],
+                        line_y_ratio=float(data.get("line_y_ratio", 0.50)),
+                        mid_x_ratio=float(data.get("mid_x_ratio", 0.45)),
+                        swap_directions=bool(data.get("swap_directions", False))
+                    )
+                    _, buffer = cv2.imencode(".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    b64_prev = base64.b64encode(buffer).decode("utf-8")
+                    await websocket.send_json({
+                        "type": "preview",
+                        "preview": b64_prev,
+                        "width": v_info["width"],
+                        "height": v_info["height"]
+                    })
+
             elif cmd == "update_config":
-                worker.update_config(data)
+                old_model = worker.engine.model_name
+                new_model = data.get("model_name")
+                if new_model and new_model != old_model:
+                    await websocket.send_json({
+                        "type": "model_status",
+                        "status": "loading",
+                        "model": new_model
+                    })
+                    worker.update_config(data)
+                    await websocket.send_json({
+                        "type": "model_status",
+                        "status": "ready",
+                        "model": worker.engine.model_name
+                    })
+                else:
+                    worker.update_config(data)
 
     except WebSocketDisconnect:
         pass

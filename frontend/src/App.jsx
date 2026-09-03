@@ -12,7 +12,8 @@ import { api } from './services/api';
 export default function App() {
   const [theme, setTheme] = useState('dark');
   const [showCalibration, setShowCalibration] = useState(false);
-  const [calibrationPreview, setCalibrationPreview] = useState(null);
+  const [restCalibrationPreview, setRestCalibrationPreview] = useState(null);
+  const abortControllerRef = React.useRef(null);
 
   // Calibration and Stream Settings
   const [config, setConfig] = useState({
@@ -30,6 +31,8 @@ export default function App() {
     isConnected,
     isPlaying,
     currentFrame,
+    calibrationPreview: wsCalibrationPreview,
+    modelStatus,
     telemetry,
     eventLogs,
     fps,
@@ -37,8 +40,14 @@ export default function App() {
     pauseStream,
     resumeStream,
     resetStream,
-    updateConfig
+    updateConfig,
+    updateConfigDebounced,
+    requestPreview,
+    requestPreviewDebounced
   } = useTrafficWebSocket();
+
+  // Active calibration preview prioritizes real-time WebSocket preview
+  const activeCalibrationPreview = wsCalibrationPreview || restCalibrationPreview;
 
   // Apply Theme to DOM
   useEffect(() => {
@@ -54,25 +63,40 @@ export default function App() {
     setConfig(updated);
 
     if (isPlaying) {
-      updateConfig(updated);
+      // Debounce parameter updates over WebSocket during playback (prevents slider event flooding)
+      updateConfigDebounced(updated, 100);
     } else if (showCalibration) {
-      fetchCalibrationPreview(updated);
+      if (isConnected) {
+        // Fast, zero-lag calibration preview directly over WebSocket (prevents HTTP API spam)
+        requestPreviewDebounced(updated, 80);
+      } else {
+        // Fallback to REST with AbortController to cancel previous in-flight requests
+        fetchCalibrationPreviewREST(updated);
+      }
     }
   };
 
-  const fetchCalibrationPreview = async (currentCfg = config) => {
+  const fetchCalibrationPreviewREST = async (currentCfg = config) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
       const res = await api.getCalibrationPreview(
         currentCfg.video_path,
         currentCfg.line_y_ratio,
         currentCfg.mid_x_ratio,
-        currentCfg.swap_directions
+        currentCfg.swap_directions,
+        abortControllerRef.current.signal
       );
-      if (res.preview) {
-        setCalibrationPreview(`data:image/jpeg;base64,${res.preview}`);
+      if (res && res.preview) {
+        setRestCalibrationPreview(`data:image/jpeg;base64,${res.preview}`);
       }
     } catch (err) {
-      console.error('Failed to get calibration preview', err);
+      if (err.name !== 'AbortError') {
+        console.error('Failed to get calibration preview', err);
+      }
     }
   };
 
@@ -80,7 +104,11 @@ export default function App() {
     const nextState = !showCalibration;
     setShowCalibration(nextState);
     if (nextState) {
-      fetchCalibrationPreview();
+      if (isConnected) {
+        requestPreview(config);
+      } else {
+        fetchCalibrationPreviewREST(config);
+      }
     }
   };
 
@@ -112,6 +140,7 @@ export default function App() {
             onChangeConfig={handleConfigChange}
             onToggleCalibrationPreview={handleToggleCalibration}
             showCalibration={showCalibration}
+            modelStatus={modelStatus}
           />
         </div>
 
@@ -124,7 +153,7 @@ export default function App() {
             onPause={pauseStream}
             onResume={resumeStream}
             onReset={resetStream}
-            calibrationPreview={calibrationPreview}
+            calibrationPreview={activeCalibrationPreview}
             showCalibration={showCalibration}
           />
 

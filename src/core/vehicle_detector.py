@@ -10,6 +10,9 @@ COCO_ID_TO_NAME = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
 CUSTOM_CLASS_MAP = {"Car": 1, "Motorcycle": 2, "Bus": 0, "Truck": 3}
 CUSTOM_ID_TO_NAME = {1: "Car", 2: "Motorcycle", 0: "Bus", 3: "Truck"}
 
+# In-memory model cache: maps resolved model path -> (YOLO instance, class_map, id_to_name)
+_MODEL_CACHE: Dict[str, Tuple[YOLO, Dict[str, int], Dict[int, str]]] = {}
+
 class VehicleDetector:
     def __init__(
         self,
@@ -55,12 +58,24 @@ class VehicleDetector:
                 resolved = model_name
 
         self.model_name = os.path.basename(resolved)
+
+        # 1. Fast Cache Hit: Instant model switch (<1ms)
+        if resolved in _MODEL_CACHE:
+            cached_model, cached_class_map, cached_id_to_name = _MODEL_CACHE[resolved]
+            self.model = cached_model
+            self.class_map = cached_class_map.copy()
+            self.id_to_name = cached_id_to_name.copy()
+            self.update_target_classes(self.selected_target_classes)
+            return
+
+        # 2. Cache Miss: Load from disk
         try:
             self.model = YOLO(resolved)
         except Exception as e:
             print(f"⚠️ Error loading YOLO model '{resolved}': {e}. Attempting default yolov11n.pt fallback.")
             self.model = YOLO("yolov11n.pt")
             self.model_name = "yolov11n.pt"
+            resolved = "yolov11n.pt"
 
         # Dynamically inspect model.names from model metadata
         self.class_map = {}
@@ -94,7 +109,20 @@ class VehicleDetector:
                 self.class_map = COCO_CLASS_MAP.copy()
                 self.id_to_name = COCO_ID_TO_NAME.copy()
 
+        # Cache the loaded model instance for instant future switching
+        _MODEL_CACHE[resolved] = (self.model, self.class_map.copy(), self.id_to_name.copy())
+
         self.update_target_classes(self.selected_target_classes)
+
+    def warmup(self, size: int = 320):
+        """Runs a fast dummy inference to compile PyTorch kernels and prevent cold-start latency."""
+        try:
+            if self.model is not None:
+                import numpy as np
+                dummy = np.zeros((size, size, 3), dtype=np.uint8)
+                self.model(dummy, imgsz=size, device=self.device, verbose=False)
+        except Exception:
+            pass
 
     def update_target_classes(self, classes_list: List[str]):
         self.selected_target_classes = classes_list

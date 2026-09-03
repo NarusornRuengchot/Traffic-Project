@@ -6,7 +6,8 @@ export function ControlPanel({
   onChangeConfig,
   onUploadSuccess,
   onToggleCalibrationPreview,
-  showCalibration
+  showCalibration,
+  modelStatus
 }) {
   const [videos, setVideos] = useState([]);
   const [models, setModels] = useState([]);
@@ -100,11 +101,19 @@ export function ControlPanel({
 
       {/* YOLO Model Selection */}
       <div>
-        <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>
-          🤖 YOLO AI Model
-        </label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
+            🤖 YOLO AI Model
+          </label>
+          {modelStatus?.status === 'loading' && (
+            <span style={{ fontSize: '0.75rem', color: '#F59E0B', fontWeight: '600' }}>
+              ⏳ Loading {modelStatus.model}...
+            </span>
+          )}
+        </div>
         <select
           className="form-select"
+          disabled={modelStatus?.status === 'loading'}
           value={config.model_name || 'best.pt'}
           onChange={(e) => onChangeConfig('model_name', e.target.value)}
         >

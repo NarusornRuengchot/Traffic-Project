@@ -24,14 +24,15 @@ export const api = {
     return await res.json();
   },
 
-  async getCalibrationPreview(videoPath, lineYRatio, midXRatio, swapDirections) {
+  async getCalibrationPreview(videoPath, lineYRatio, midXRatio, swapDirections, signal = null) {
     const params = new URLSearchParams({
       video_path: videoPath,
       line_y_ratio: lineYRatio,
       mid_x_ratio: midXRatio,
       swap_directions: swapDirections,
     });
-    const res = await fetch(`${API_BASE}/api/calibration/preview?${params.toString()}`);
+    const options = signal ? { signal } : {};
+    const res = await fetch(`${API_BASE}/api/calibration/preview?${params.toString()}`, options);
     return await res.json();
   },
 

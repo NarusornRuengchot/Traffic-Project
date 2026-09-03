@@ -4,6 +4,8 @@ export function useTrafficWebSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(null);
+  const [calibrationPreview, setCalibrationPreview] = useState(null);
+  const [modelStatus, setModelStatus] = useState({ status: 'ready', model: '' });
   const [telemetry, setTelemetry] = useState({
     time_sec: 0,
     real_time: '--:--:--',
@@ -27,6 +29,8 @@ export function useTrafficWebSocket() {
   const [fps, setFps] = useState(0);
   const wsRef = useRef(null);
   const fpsTimerRef = useRef({ count: 0, lastTime: performance.now() });
+  const configDebounceTimerRef = useRef(null);
+  const previewDebounceTimerRef = useRef(null);
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -75,6 +79,13 @@ export function useTrafficWebSocket() {
             fpsTimerRef.current.count = 0;
             fpsTimerRef.current.lastTime = now;
           }
+        } else if (msg.type === 'preview') {
+          // Instant calibration preview via WebSocket (zero HTTP API spam)
+          if (msg.preview) {
+            setCalibrationPreview(`data:image/jpeg;base64,${msg.preview}`);
+          }
+        } else if (msg.type === 'model_status') {
+          setModelStatus({ status: msg.status, model: msg.model });
         } else if (msg.type === 'status') {
           setIsPlaying(msg.playing);
         }
@@ -87,6 +98,8 @@ export function useTrafficWebSocket() {
   useEffect(() => {
     connect();
     return () => {
+      if (configDebounceTimerRef.current) clearTimeout(configDebounceTimerRef.current);
+      if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -123,10 +136,37 @@ export function useTrafficWebSocket() {
     sendCommand('update_config', config);
   }, [sendCommand]);
 
+  // Debounced update to prevent flooding WebSocket when moving sliders
+  const updateConfigDebounced = useCallback((config, delay = 100) => {
+    if (configDebounceTimerRef.current) {
+      clearTimeout(configDebounceTimerRef.current);
+    }
+    configDebounceTimerRef.current = setTimeout(() => {
+      sendCommand('update_config', config);
+    }, delay);
+  }, [sendCommand]);
+
+  // Real-time debounced calibration preview via WebSocket
+  const requestPreview = useCallback((config) => {
+    sendCommand('get_preview', config);
+  }, [sendCommand]);
+
+  const requestPreviewDebounced = useCallback((config, delay = 120) => {
+    if (previewDebounceTimerRef.current) {
+      clearTimeout(previewDebounceTimerRef.current);
+    }
+    previewDebounceTimerRef.current = setTimeout(() => {
+      sendCommand('get_preview', config);
+    }, delay);
+  }, [sendCommand]);
+
   return {
     isConnected,
     isPlaying,
     currentFrame,
+    calibrationPreview,
+    setCalibrationPreview,
+    modelStatus,
     telemetry,
     eventLogs,
     fps,
@@ -135,6 +175,9 @@ export function useTrafficWebSocket() {
     resumeStream,
     resetStream,
     updateConfig,
+    updateConfigDebounced,
+    requestPreview,
+    requestPreviewDebounced,
     reconnect: connect
   };
 }

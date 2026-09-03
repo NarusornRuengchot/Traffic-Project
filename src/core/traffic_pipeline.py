@@ -79,8 +79,14 @@ class TrafficPipeline:
     def get_available_devices() -> List[str]:
         return VehicleDetector.get_available_devices()
 
-    @staticmethod
-    def get_video_info(video_path: str) -> Optional[Dict[str, Any]]:
+    _VIDEO_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
+
+    @classmethod
+    def get_video_info(cls, video_path: str) -> Optional[Dict[str, Any]]:
+        # Fast cache check: avoids repeated disk access and OpenCV decoding
+        if video_path in cls._VIDEO_METADATA_CACHE:
+            return cls._VIDEO_METADATA_CACHE[video_path]
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return None
@@ -92,13 +98,15 @@ class TrafficPipeline:
         cap.release()
 
         if success:
-            return {
+            info = {
                 "width": width,
                 "height": height,
                 "fps": fps if fps > 0 else 30.0,
                 "total_frames": total_frames,
                 "first_frame": frame
             }
+            cls._VIDEO_METADATA_CACHE[video_path] = info
+            return info
         return None
 
     @staticmethod
