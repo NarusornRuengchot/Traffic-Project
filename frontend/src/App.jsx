@@ -36,6 +36,11 @@ export default function App() {
     telemetry,
     eventLogs,
     fps,
+    streamError,
+    cctvTestResult,
+    setCctvTestResult,
+    clearStreamError,
+    testCctv,
     startStream,
     pauseStream,
     resumeStream,
@@ -117,12 +122,20 @@ export default function App() {
     startStream(config);
   };
 
+  const isLive = Boolean(
+    telemetry?.is_live ||
+    config.video_path === 'webcam:0' ||
+    config.video_path?.startsWith('rtsp://') ||
+    config.video_path?.startsWith('http://')
+  );
+
   return (
     <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px' }}>
       {/* Top Header */}
       <Header
         isConnected={isConnected}
         isPlaying={isPlaying}
+        isLive={isLive}
         fps={fps}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -141,14 +154,51 @@ export default function App() {
             onToggleCalibrationPreview={handleToggleCalibration}
             showCalibration={showCalibration}
             modelStatus={modelStatus}
+            testCctv={testCctv}
+            cctvTestResult={cctvTestResult}
+            setCctvTestResult={setCctvTestResult}
           />
         </div>
 
         {/* Center Column: Video Stream & Event Logs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Connection Error Banner */}
+          {streamError && (
+            <div style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              borderRadius: '10px',
+              padding: '14px 18px',
+              color: '#EF4444',
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '12px',
+              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.15)',
+              whiteSpace: 'pre-wrap'
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: '700', fontSize: '0.9rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>⚠️ ไม่สามารถเปิดสัญญาณกล้อง CCTV / แหล่งภาพได้</span>
+                </div>
+                <div style={{ lineHeight: '1.5', opacity: 0.95 }}>{streamError}</div>
+              </div>
+              <button
+                type="button"
+                onClick={clearStreamError}
+                style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '1.2rem', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+                title="ปิดข้อความแจ้งเตือน"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <VideoPlayer
             currentFrame={currentFrame}
             isPlaying={isPlaying}
+            isLive={isLive}
             onStart={handleStartStream}
             onPause={pauseStream}
             onResume={resumeStream}

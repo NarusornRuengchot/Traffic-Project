@@ -36,12 +36,20 @@ class StreamWorker:
         self._lock = threading.Lock()
 
         # Video source state
+        self.video_path: Optional[str] = None
         self.cap: Optional[cv2.VideoCapture] = None
-        self.video_path: str = ""
         self.fps: float = 30.0
         self.total_frames: int = 0
         self.current_frame_idx: int = 0
         self.start_dt: datetime.datetime = datetime.datetime.now()
+        self.is_live: bool = False
+
+        # Thread synchronization
+        self._thread: Optional[threading.Thread] = None
+        self._is_running = threading.Event()
+        self._is_paused = threading.Event()
+        self._stop_requested = threading.Event()
+        self._lock = threading.Lock()
 
         # Calibration & detection parameters
         self.line_y_ratio: float = 0.50
@@ -49,12 +57,9 @@ class StreamWorker:
         self.swap_directions: bool = False
         self.conf_threshold: float = 0.25
 
-        # Bounded frame queue with drop-oldest policy for real-time streaming
+        # Bounded frame buffer with drop-oldest policy (prevents WebSocket lag)
         self.frame_queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
-        self.last_telemetry: Dict[str, Any] = {}
-
-        # Worker thread handle
-        self._thread: Optional[threading.Thread] = None
+        self.last_telemetry: Optional[Dict[str, Any]] = None
 
     @property
     def is_playing(self) -> bool:
@@ -65,27 +70,61 @@ class StreamWorker:
         return self._is_paused.is_set()
 
     def load_video(self, video_path: str) -> bool:
+        """
+        Loads video file or connects to real-time live video feed (Webcam, RTSP, IP Camera).
+        """
         with self._lock:
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
 
-            if not os.path.exists(video_path):
-                print(f"❌ Video not found: {video_path}")
-                return False
+            self.video_path = str(video_path)
+            self.is_live = (
+                self.video_path.startswith("webcam:")
+                or self.video_path.isdigit()
+                or self.video_path.startswith(("rtsp://", "http://", "https://"))
+            )
 
-            self.cap = cv2.VideoCapture(video_path)
-            if self.cap.isOpened():
-                self.video_path = video_path
+            if self.is_live:
+                if self.video_path.startswith("webcam:") or self.video_path.isdigit():
+                    cam_idx = int(self.video_path.replace("webcam:", ""))
+                    self.cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(cam_idx)
+                else:
+                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                    self.cap = cv2.VideoCapture(
+                        self.video_path,
+                        cv2.CAP_FFMPEG,
+                        [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000]
+                    )
+
+                if not self.cap or not self.cap.isOpened():
+                    print(f"❌ Failed to open live video source: {video_path}")
+                    return False
+
+                # Crucial for true real-time zero latency: set internal buffer to 1 frame
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
-                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                self.total_frames = 0
                 self.current_frame_idx = 0
                 self.start_dt = datetime.datetime.now()
-                print(f"🎬 Loaded video: {video_path} (FPS: {self.fps}, Frames: {self.total_frames})")
+                print(f"🔴 Connected to REAL-TIME LIVE STREAM: {video_path} (FPS: {self.fps})")
                 return True
             else:
-                print(f"❌ OpenCV failed to open video: {video_path}")
-                return False
+                if not os.path.exists(video_path):
+                    print(f"❌ Video not found: {video_path}")
+                    return False
+
+                self.cap = cv2.VideoCapture(video_path)
+                if self.cap.isOpened():
+                    self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+                    self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    self.current_frame_idx = 0
+                    self.start_dt = datetime.datetime.now()
+                    print(f"🎬 Loaded video: {video_path} (FPS: {self.fps}, Frames: {self.total_frames})")
+                    return True
+                else:
+                    print(f"❌ OpenCV failed to open video: {video_path}")
+                    return False
 
     def start(self):
         """Starts or restarts the background stream processing thread."""
@@ -106,7 +145,7 @@ class StreamWorker:
     def reset(self):
         with self._lock:
             self.engine.reset_state()
-            if self.cap is not None and self.cap.isOpened():
+            if not self.is_live and self.cap is not None and self.cap.isOpened():
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             self.current_frame_idx = 0
             # Drain queue
@@ -165,14 +204,19 @@ class StreamWorker:
 
                 success, frame = self.cap.read()
                 if not success:
-                    # Video ended -> loop seamlessly
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    self.current_frame_idx = 0
-                    success, frame = self.cap.read()
-                    if not success:
-                        self._is_running.clear()
-                        time.sleep(0.05)
+                    if self.is_live:
+                        # Real-time camera brief dropout/reconnect buffer
+                        time.sleep(0.04)
                         continue
+                    else:
+                        # Video ended -> loop seamlessly
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        self.current_frame_idx = 0
+                        success, frame = self.cap.read()
+                        if not success:
+                            self._is_running.clear()
+                            time.sleep(0.05)
+                            continue
 
                 self.current_frame_idx += 1
                 curr_idx = self.current_frame_idx
@@ -188,16 +232,18 @@ class StreamWorker:
 
             # Heavy AI pipeline execution
             try:
+                cur_start_dt = None if self.is_live else self.start_dt
                 annotated_frame, telemetry = self.engine.process_frame(
                     frame=frame,
                     frame_idx=curr_idx,
                     fps=self.fps,
-                    start_datetime=self.start_dt,
+                    start_datetime=cur_start_dt,
                     line_y_ratio=line_y,
                     mid_x_ratio=mid_x,
                     swap_directions=swap_dir,
                     img_size=self.inference_size
                 )
+                telemetry["is_live"] = self.is_live
             except Exception as err:
                 print(f"⚠️ Error during frame inference: {err}")
                 time.sleep(0.03)
@@ -235,10 +281,14 @@ class StreamWorker:
                     pass
 
             # Frame rate throttle
-            elapsed = time.perf_counter() - loop_start
-            sleep_time = frame_interval - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            if not self.is_live:
+                elapsed = time.perf_counter() - loop_start
+                sleep_time = frame_interval - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+            else:
+                # Live cameras are paced by camera hardware -> yield tiny slice
+                time.sleep(0.001)
 
     def get_events_log(self) -> List[Dict[str, Any]]:
         with self._lock:

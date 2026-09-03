@@ -27,6 +27,8 @@ export function useTrafficWebSocket() {
 
   const [eventLogs, setEventLogs] = useState([]);
   const [fps, setFps] = useState(0);
+  const [streamError, setStreamError] = useState(null);
+  const [cctvTestResult, setCctvTestResult] = useState(null);
   const wsRef = useRef(null);
   const fpsTimerRef = useRef({ count: 0, lastTime: performance.now() });
   const configDebounceTimerRef = useRef(null);
@@ -86,7 +88,15 @@ export function useTrafficWebSocket() {
           }
         } else if (msg.type === 'model_status') {
           setModelStatus({ status: msg.status, model: msg.model });
+        } else if (msg.type === 'error') {
+          setStreamError(msg.message);
+          setIsPlaying(false);
+        } else if (msg.type === 'cctv_test_result') {
+          setCctvTestResult(msg);
         } else if (msg.type === 'status') {
+          if (msg.playing) {
+            setStreamError(null);
+          }
           setIsPlaying(msg.playing);
         }
       } catch (err) {
@@ -160,6 +170,15 @@ export function useTrafficWebSocket() {
     }, delay);
   }, [sendCommand]);
 
+  const testCctv = useCallback((url) => {
+    setCctvTestResult(null);
+    sendCommand('test_cctv', { url });
+  }, [sendCommand]);
+
+  const clearStreamError = useCallback(() => {
+    setStreamError(null);
+  }, []);
+
   return {
     isConnected,
     isPlaying,
@@ -170,6 +189,11 @@ export function useTrafficWebSocket() {
     telemetry,
     eventLogs,
     fps,
+    streamError,
+    cctvTestResult,
+    setCctvTestResult,
+    clearStreamError,
+    testCctv,
     startStream,
     pauseStream,
     resumeStream,

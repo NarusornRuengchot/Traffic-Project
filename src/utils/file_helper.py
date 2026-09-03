@@ -66,12 +66,55 @@ def list_available_models(search_dirs: List[str] = None) -> List[Dict[str, Any]]
 
     return models
 
+def resolve_video_source(source_path: str, upload_dir: str = "uploads", base_dir: str = ".") -> str:
+    """Resolves a video source, handling live webcam, RTSP/HTTP streams, and local files."""
+    if not source_path:
+        return ""
+
+    # Live Webcam: "webcam:0", "webcam:1", "0", "1"
+    if str(source_path).startswith("webcam:") or str(source_path).isdigit():
+        return str(source_path)
+
+    # Live RTSP / HTTP Camera Stream
+    if str(source_path).startswith(("rtsp://", "http://", "https://")):
+        return str(source_path)
+
+    # Check direct file path
+    if os.path.exists(source_path):
+        return source_path
+
+    # Check project base dir
+    cand_base = os.path.join(base_dir, source_path)
+    if os.path.exists(cand_base):
+        return cand_base
+
+    # Check uploads directory
+    cand_up = os.path.join(upload_dir, os.path.basename(source_path))
+    if os.path.exists(cand_up):
+        return cand_up
+
+    return source_path
+
 def list_available_videos(upload_dir: str = "uploads", project_dir: str = ".") -> List[Dict[str, Any]]:
-    """Scans and returns all available videos from project root and uploads folder."""
+    """Scans and returns all available videos and real-time live sources (webcam, RTSP)."""
     videos = []
     seen_paths = set()
 
-    # Project directory
+    # 1. Real-time Live Sources (Webcam & IP Camera)
+    videos.append({
+        "id": "webcam:0",
+        "name": "🔴 📷 Live Webcam (Camera 0 - Real-time)",
+        "path": "webcam:0",
+        "type": "live"
+    })
+    videos.append({
+        "id": "rtsp_stream",
+        "name": "🔴 🌐 Live RTSP / IP Camera (CCTV Stream)",
+        "path": "rtsp_stream",
+        "type": "live"
+    })
+
+    # 2. Project directory sample and local videos
     if os.path.exists(project_dir):
         for f in sorted(os.listdir(project_dir)):
             if os.path.isfile(f) and f.lower().endswith(SUPPORTED_VIDEO_EXTENSIONS):
@@ -87,7 +130,7 @@ def list_available_videos(upload_dir: str = "uploads", project_dir: str = ".") -
                     })
                     seen_paths.add(abs_p)
 
-    # Uploaded directory
+    # 3. Uploaded directory
     if os.path.exists(upload_dir):
         for f in sorted(os.listdir(upload_dir)):
             full_path = os.path.join(upload_dir, f)

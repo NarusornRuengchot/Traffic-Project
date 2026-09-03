@@ -87,27 +87,68 @@ class TrafficPipeline:
         if video_path in cls._VIDEO_METADATA_CACHE:
             return cls._VIDEO_METADATA_CACHE[video_path]
 
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return None
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        success, frame = cap.read()
-        cap.release()
+        is_live = (
+            str(video_path).startswith("webcam:")
+            or str(video_path).isdigit()
+            or str(video_path).startswith(("rtsp://", "http://", "https://"))
+        )
 
-        if success:
-            info = {
-                "width": width,
-                "height": height,
-                "fps": fps if fps > 0 else 30.0,
-                "total_frames": total_frames,
-                "first_frame": frame
-            }
-            cls._VIDEO_METADATA_CACHE[video_path] = info
-            return info
-        return None
+        if is_live:
+            if str(video_path).startswith("webcam:") or str(video_path).isdigit():
+                cam_idx = int(str(video_path).replace("webcam:", ""))
+                cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(cam_idx)
+            else:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                cap = cv2.VideoCapture(
+                    video_path,
+                    cv2.CAP_FFMPEG,
+                    [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000]
+                )
+
+            if not cap or not cap.isOpened():
+                return None
+
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
+            fps = 30.0
+            total_frames = 0
+            success, frame = cap.read()
+            cap.release()
+
+            if success:
+                info = {
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                    "total_frames": total_frames,
+                    "first_frame": frame,
+                    "is_live": True
+                }
+                return info
+            return None
+        else:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return None
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            success, frame = cap.read()
+            cap.release()
+
+            if success:
+                info = {
+                    "width": width,
+                    "height": height,
+                    "fps": fps if fps > 0 else 30.0,
+                    "total_frames": total_frames,
+                    "first_frame": frame,
+                    "is_live": False
+                }
+                cls._VIDEO_METADATA_CACHE[video_path] = info
+                return info
+            return None
 
     @staticmethod
     def generate_calibration_preview(
@@ -128,7 +169,7 @@ class TrafficPipeline:
         frame: np.ndarray,
         frame_idx: int,
         fps: float,
-        start_datetime: datetime.datetime,
+        start_datetime: Optional[datetime.datetime] = None,
         line_y_ratio: float = 0.50,
         mid_x_ratio: float = 0.45,
         swap_directions: bool = False,
@@ -192,7 +233,10 @@ class TrafficPipeline:
 
         # 5. Real-world Timestamps
         timestamp_sec = frame_idx / fps if fps > 0 else 0.0
-        current_real_time = start_datetime + datetime.timedelta(seconds=timestamp_sec)
+        if start_datetime is None:
+            current_real_time = datetime.datetime.now()
+        else:
+            current_real_time = start_datetime + datetime.timedelta(seconds=timestamp_sec)
         real_time_str = current_real_time.strftime("%H:%M:%S")
         real_time_full_str = current_real_time.strftime("%Y-%m-%d %H:%M:%S")
 

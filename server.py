@@ -11,14 +11,20 @@ import io
 
 import cv2
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.core.traffic_pipeline import TrafficPipeline
 from src.core.analytics import evaluate_traffic_level
-from src.utils.file_helper import resolve_model_path, list_available_models, list_available_videos, SUPPORTED_VIDEO_EXTENSIONS
+from src.utils.file_helper import (
+    resolve_model_path,
+    list_available_models,
+    list_available_videos,
+    resolve_video_source,
+    SUPPORTED_VIDEO_EXTENSIONS
+)
 from src.services.stream_worker import StreamWorker
 
 app = FastAPI(title="KU SRC Smart Traffic Dashboard API", version="2.3.0")
@@ -48,24 +54,10 @@ global_engine = TrafficPipeline(model_name=DEFAULT_MODEL)
 active_worker: Optional[StreamWorker] = None
 
 def resolve_video_path(video_path: str) -> str:
-    """Finds exact video path in project root or uploads folder."""
-    if os.path.exists(video_path):
-        return video_path
-
-    cand = os.path.join(BASE_DIR, video_path)
-    if os.path.exists(cand):
-        return cand
-
-    cand_up = os.path.join(UPLOAD_DIR, os.path.basename(video_path))
-    if os.path.exists(cand_up):
-        return cand_up
-
-    # Fallback to first available video
-    vids = list_available_videos(upload_dir=UPLOAD_DIR, project_dir=BASE_DIR)
-    if vids:
-        return vids[0]["path"]
-
-    return video_path
+    """Finds exact video path in project root, uploads folder, or live webcam/RTSP stream."""
+    if not video_path:
+        return "webcam:0"
+    return resolve_video_source(video_path, upload_dir=UPLOAD_DIR, base_dir=BASE_DIR)
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
@@ -163,6 +155,44 @@ async def export_data(format: str = Query("csv")):
         headers={"Content-Disposition": "attachment; filename=traffic_events.csv"}
     )
 
+@app.post("/api/cctv/test")
+async def test_cctv_endpoint(data: Dict[str, Any] = Body(...)):
+    """Tests CCTV/RTSP connection with a fast 4-second timeout and returns connection status."""
+    url = data.get("url", "").strip()
+    if not url or url == "rtsp_stream":
+        return {"success": False, "message": "กรุณาระบุ URL กล้องวงจรปิด (เช่น rtsp://admin:pass@192.168.1.100:554/stream1)"}
+
+    resolved = resolve_video_path(url)
+    if resolved.startswith("webcam:"):
+        cam_idx = int(resolved.replace("webcam:", ""))
+        cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(cam_idx)
+    else:
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        cap = cv2.VideoCapture(
+            resolved,
+            cv2.CAP_FFMPEG,
+            [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000]
+        )
+
+    if not cap or not cap.isOpened():
+        return {
+            "success": False,
+            "message": f"❌ ไม่สามารถเชื่อมต่อกล้องได้: กล้องไม่ตอบสนอง กรุณาตรวจสอบ IP, Port, และรหัสผ่าน"
+        }
+
+    success, frame = cap.read()
+    cap.release()
+    if not success or frame is None:
+        return {"success": False, "message": "⚠️ สตรีมเปิดได้แต่ไม่ได้รับภาพจากกล้อง"}
+
+    h, w = frame.shape[:2]
+    return {
+        "success": True,
+        "message": f"✅ เชื่อมต่อกล้องสำเร็จ! (ความละเอียด {w}x{h} px)",
+        "width": w,
+        "height": h
+    }
+
 # -------------------------------------------------------------
 # Decoupled Real-Time WebSocket Streaming Endpoint
 # -------------------------------------------------------------
@@ -215,10 +245,88 @@ async def websocket_stream_endpoint(websocket: WebSocket):
                 worker.update_config(data)
                 vid_path = data.get("video_path", "KUSRC_Traffic.mov")
                 resolved_vid = resolve_video_path(vid_path)
-                worker.load_video(resolved_vid)
+
+                # Validation: prevent empty or placeholder RTSP selection
+                if resolved_vid == "rtsp_stream" or not str(resolved_vid).strip():
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "⚠️ กรุณากรอก URL กล้อง CCTV (เช่น rtsp://admin:pass@192.168.1.100:554/stream1 หรือ http://...) ในช่องข้อความก่อนเริ่ม"
+                    })
+                    await websocket.send_json({"type": "status", "playing": False})
+                    continue
+
+                success = worker.load_video(resolved_vid)
+                if not success:
+                    error_msg = f"❌ ไม่สามารถเปิดสัญญาณภาพได้: {vid_path}"
+                    if str(resolved_vid).startswith(("rtsp://", "http://", "https://")):
+                        error_msg = (
+                            f"❌ ไม่สามารถเชื่อมต่อกล้อง CCTV / RTSP ({vid_path}) ได้\n\n"
+                            "สาเหตุที่พบบ่อย:\n"
+                            "1. หมายเลข IP Address หรือ Port 554 ไม่ถูกต้อง หรือกล้องยังไม่ได้เปิด\n"
+                            "2. ต้องใส่ Username/Password ของกล้อง (เช่น rtsp://admin:1234@192.168.1.100:554/...)\n"
+                            "3. อุปกรณ์คอมพิวเตอร์ไม่ได้อยู่ในวง Wi-Fi / LAN เดียวกับกล้อง\n"
+                            "4. หากเป็นหน้าเว็บหรือ YouTube จะเปิดตรงไม่ได้ ต้องเป็นสตรีม RTSP หรือ HTTP MJPEG"
+                        )
+                    elif str(resolved_vid).startswith("webcam:"):
+                        error_msg = f"❌ ไม่สามารถเปิดกล้องเว็บแคม ({vid_path}) ได้ กรุณาตรวจสอบว่ามีโปรแกรมอื่นกำลังเปิดกล้องอยู่หรือไม่"
+
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": error_msg
+                    })
+                    await websocket.send_json({"type": "status", "playing": False})
+                    continue
+
                 worker.reset()
                 worker.start()
                 await websocket.send_json({"type": "status", "playing": True})
+
+            elif cmd == "test_cctv":
+                test_url = data.get("url", "").strip()
+                resolved = resolve_video_path(test_url)
+                if resolved == "rtsp_stream" or not resolved:
+                    await websocket.send_json({
+                        "type": "cctv_test_result",
+                        "success": False,
+                        "message": "กรุณากรอก URL ของกล้องก่อนทดสอบ"
+                    })
+                    continue
+
+                if resolved.startswith("webcam:"):
+                    cam_idx = int(resolved.replace("webcam:", ""))
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(cam_idx)
+                else:
+                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                    cap = cv2.VideoCapture(
+                        resolved,
+                        cv2.CAP_FFMPEG,
+                        [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 4000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 4000]
+                    )
+
+                if not cap or not cap.isOpened():
+                    await websocket.send_json({
+                        "type": "cctv_test_result",
+                        "success": False,
+                        "message": f"❌ เชื่อมต่อไม่สำเร็จ: กล้อง {test_url} ไม่ตอบสนอง (ตรวจสอบ IP/Port/User/Pass)"
+                    })
+                else:
+                    s_frame, t_frame = cap.read()
+                    cap.release()
+                    if s_frame and t_frame is not None:
+                        h_t, w_t = t_frame.shape[:2]
+                        await websocket.send_json({
+                            "type": "cctv_test_result",
+                            "success": True,
+                            "message": f"✅ เชื่อมต่อกล้อง CCTV สำเร็จ! ความละเอียดภาพ {w_t}x{h_t} พร้อมใช้งาน",
+                            "width": w_t,
+                            "height": h_t
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "cctv_test_result",
+                            "success": False,
+                            "message": "⚠️ เชื่อมต่อได้แต่ไม่ได้รับภาพจากกล้อง"
+                        })
 
             elif cmd == "pause":
                 worker.pause()

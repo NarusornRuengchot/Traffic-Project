@@ -3,6 +3,7 @@ import React, { useRef } from 'react';
 export function VideoPlayer({
   currentFrame,
   isPlaying,
+  isLive,
   onStart,
   onPause,
   onResume,
@@ -27,7 +28,13 @@ export function VideoPlayer({
     <div className="glass-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h2 style={{ fontSize: '1rem', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          📹 Live AI Stream & Tracking
+          📹 {isLive ? 'Real-time Live Camera Feed' : 'Live AI Stream & Tracking'}
+          {isLive && isPlaying && (
+            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', fontWeight: '700', border: '1px solid rgba(239, 68, 68, 0.4)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'inline-block' }}></span>
+              🔴 LIVE
+            </span>
+          )}
           {showCalibration && (
             <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b' }}>
               Calibration Mode
@@ -75,12 +82,14 @@ export function VideoPlayer({
           />
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🎬</div>
+            <div style={{ fontSize: '3rem', marginBottom: '12px' }}>{isLive ? '📷' : '🎬'}</div>
             <div style={{ fontWeight: '600', fontSize: '1rem', color: 'var(--text-secondary)' }}>
-              Stream Ready
+              {isLive ? '🔴 Real-time Live Camera Ready' : 'Stream Ready'}
             </div>
             <div style={{ fontSize: '0.8rem', marginTop: '4px' }}>
-              Select a video and press <strong>"Start AI Analysis"</strong> to begin.
+              {isLive
+                ? 'กดปุ่ม "▶ เริ่มตรวจจับภาพสด (Start Live)" เพื่อเริ่มวิเคราะห์ภาพจากกล้องแบบเรียลไทม์'
+                : 'Select a video and press "Start AI Analysis" to begin.'}
             </div>
           </div>
         )}
@@ -91,7 +100,7 @@ export function VideoPlayer({
         <div style={{ display: 'flex', gap: '10px' }}>
           {!isPlaying ? (
             <button onClick={onStart} className="btn btn-primary" style={{ padding: '8px 20px' }}>
-              ▶ Start AI Analysis
+              {isLive ? '🔴 ▶ เริ่มตรวจจับภาพสด (Start Live)' : '▶ Start AI Analysis'}
             </button>
           ) : (
             <button onClick={onPause} className="btn btn-secondary" style={{ padding: '8px 20px' }}>
