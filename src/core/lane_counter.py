@@ -1,11 +1,14 @@
 from typing import Dict, List, Tuple, Set, Optional, Any
+from collections import deque
 import numpy as np
 
 class LaneCounter:
-    def __init__(self):
+    def __init__(self, max_counted_cache: int = 2000):
         self.inbound_count = 0
         self.outbound_count = 0
+        self.max_counted_cache = max_counted_cache
         self.counted_ids: Set[int] = set()
+        self._counted_queue: deque = deque(maxlen=max_counted_cache)
         self.class_counts: Dict[str, int] = {"Car": 0, "Motorcycle": 0, "Bus": 0, "Truck": 0}
         self.events_log: List[Dict[str, Any]] = []
 
@@ -13,8 +16,18 @@ class LaneCounter:
         self.inbound_count = 0
         self.outbound_count = 0
         self.counted_ids.clear()
+        self._counted_queue.clear()
         self.class_counts = {"Car": 0, "Motorcycle": 0, "Bus": 0, "Truck": 0}
         self.events_log.clear()
+
+    def _mark_counted(self, track_id: int):
+        """Adds track ID to counted cache with bounded size to prevent memory leaks."""
+        if len(self.counted_ids) >= self.max_counted_cache:
+            if len(self._counted_queue) > 0:
+                oldest_id = self._counted_queue.popleft()
+                self.counted_ids.discard(oldest_id)
+        self.counted_ids.add(track_id)
+        self._counted_queue.append(track_id)
 
     def check_crossovers(
         self,
@@ -28,7 +41,8 @@ class LaneCounter:
         swap_directions: bool,
         timestamp_sec: float,
         real_time_full_str: str,
-        traffic_level_str: str
+        traffic_level_str: str,
+        frame_width: Optional[int] = None
     ) -> Tuple[List[Dict[str, Any]], List[Tuple[Tuple[int, int], Tuple[int, int]]]]:
         """
         Calculates line crossover and updates counts.
@@ -36,6 +50,9 @@ class LaneCounter:
         """
         new_events = []
         triggered_lines = []
+
+        # Determine effective frame width for outbound line rendering
+        effective_width = frame_width if frame_width is not None else (mid_x * 2)
 
         for box, track_id, class_idx in zip(boxes_xyxy, track_ids, class_ids):
             center_x = int((box[0] + box[2]) / 2)
@@ -47,7 +64,7 @@ class LaneCounter:
                 # Check if crossed the horizontal line
                 if (prev_y <= line_y <= center_y) or (center_y <= line_y <= prev_y):
                     if track_id not in self.counted_ids:
-                        self.counted_ids.add(track_id)
+                        self._mark_counted(track_id)
 
                         # Interpolate exact X coordinate where vehicle crossed LINE_Y
                         if center_y != prev_y:
@@ -73,7 +90,7 @@ class LaneCounter:
                             else:
                                 self.inbound_count += 1
                                 direction = "Inbound"
-                            triggered_lines.append(((mid_x, line_y), (int(box[2] * 2), line_y)))
+                            triggered_lines.append(((mid_x, line_y), (effective_width, line_y)))
 
                         if class_name in self.class_counts:
                             self.class_counts[class_name] += 1
@@ -94,3 +111,4 @@ class LaneCounter:
             track_history[track_id] = (center_x, center_y)
 
         return new_events, triggered_lines
+

@@ -18,10 +18,10 @@ class VehicleDetector:
         img_size: int = 640,
         device: str = "cpu"
     ):
-        self.conf_threshold = conf_threshold
-        self.img_size = img_size
-        self.device = self._auto_select_device(device)
-        self.model_name = ""
+        self.conf_threshold: float = conf_threshold
+        self.img_size: int = img_size
+        self.device: str = self._auto_select_device(device)
+        self.model_name: str = ""
         self.model: Optional[YOLO] = None
         self.class_map: Dict[str, int] = {}
         self.id_to_name: Dict[int, str] = {}
@@ -47,15 +47,52 @@ class VehicleDetector:
 
     def load_model(self, model_name: str):
         resolved = resolve_model_path(model_name)
-        self.model_name = os.path.basename(resolved)
-        self.model = YOLO(resolved)
+        if not os.path.exists(resolved):
+            fallback = "yolov11n.pt" if os.path.exists("yolov11n.pt") else "yolov8n.pt"
+            if os.path.exists(fallback):
+                resolved = fallback
+            else:
+                resolved = model_name
 
-        if "best.pt" in self.model_name.lower():
-            self.class_map = CUSTOM_CLASS_MAP.copy()
-            self.id_to_name = CUSTOM_ID_TO_NAME.copy()
-        else:
-            self.class_map = COCO_CLASS_MAP.copy()
-            self.id_to_name = COCO_ID_TO_NAME.copy()
+        self.model_name = os.path.basename(resolved)
+        try:
+            self.model = YOLO(resolved)
+        except Exception as e:
+            print(f"⚠️ Error loading YOLO model '{resolved}': {e}. Attempting default yolov11n.pt fallback.")
+            self.model = YOLO("yolov11n.pt")
+            self.model_name = "yolov11n.pt"
+
+        # Dynamically inspect model.names from model metadata
+        self.class_map = {}
+        self.id_to_name = {}
+
+        model_names = getattr(self.model, "names", None)
+        if isinstance(model_names, dict):
+            for cid, cname in model_names.items():
+                name_clean = str(cname).strip().capitalize()
+                # Normalize vehicle category names
+                if name_clean.lower() in ["car", "automobile", "sedan", "suv", "van"]:
+                    std_name = "Car"
+                elif name_clean.lower() in ["motorcycle", "motorbike", "bike", "scooter"]:
+                    std_name = "Motorcycle"
+                elif name_clean.lower() in ["bus"]:
+                    std_name = "Bus"
+                elif name_clean.lower() in ["truck"]:
+                    std_name = "Truck"
+                else:
+                    std_name = name_clean
+
+                self.id_to_name[int(cid)] = std_name
+                self.class_map[std_name] = int(cid)
+
+        # Fallback if names dict was incomplete or lacked target classes
+        if not any(c in self.class_map for c in ["Car", "Motorcycle", "Bus", "Truck"]):
+            if "best.pt" in self.model_name.lower() or "custom" in self.model_name.lower():
+                self.class_map = CUSTOM_CLASS_MAP.copy()
+                self.id_to_name = CUSTOM_ID_TO_NAME.copy()
+            else:
+                self.class_map = COCO_CLASS_MAP.copy()
+                self.id_to_name = COCO_ID_TO_NAME.copy()
 
         self.update_target_classes(self.selected_target_classes)
 
@@ -73,3 +110,4 @@ class VehicleDetector:
 
     def set_device(self, device: str):
         self.device = self._auto_select_device(device)
+

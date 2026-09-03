@@ -170,7 +170,8 @@ class TrafficPipeline:
         active_count, stall_ratio, inbound_active, outbound_active, _ = self.tracker.update_positions(
             boxes_xyxy=boxes_xyxy,
             track_ids=active_ids,
-            mid_x=mid_x
+            mid_x=mid_x,
+            frame_idx=frame_idx
         )
 
         # 4. Rolling Density & Congestion level
@@ -199,7 +200,8 @@ class TrafficPipeline:
             swap_directions=swap_directions,
             timestamp_sec=timestamp_sec,
             real_time_full_str=real_time_full_str,
-            traffic_level_str=f"{traffic_level.emoji} {traffic_level.thai_desc}"
+            traffic_level_str=f"{traffic_level.emoji} {traffic_level.thai_desc}",
+            frame_width=width
         )
 
         # 7. Draw Visual Overlays & Tripwires
