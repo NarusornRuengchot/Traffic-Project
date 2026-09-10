@@ -1,6 +1,8 @@
+# pyrefly: ignore [missing-import]
 import cv2
 import os
 import datetime
+# pyrefly: ignore [missing-import]
 from ultralytics import YOLO
 
 # ฟังก์ชันตรวจสอบชื่อไฟล์โมเดลเพื่อป้องกันข้อผิดพลาดกรณีพิมพ์ชื่อไฟล์สลับไปมาระหว่าง yolo11 และ yolov11

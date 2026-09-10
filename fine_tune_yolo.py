@@ -15,6 +15,7 @@ Fine-tune YOLO model บน Roboflow dataset (YOLOv11 format)
 """
 
 import os
+# pyrefly: ignore [missing-import]
 from ultralytics import YOLO
 
 # ============================================================
