@@ -120,15 +120,34 @@ class AITrafficEngine:
 
     @staticmethod
     def get_available_models() -> List[Dict[str, Any]]:
-        """Scans directory for available YOLO model files."""
+        """Scans directory and standard catalogue for available YOLO model files."""
         models = []
         if os.path.exists("best.pt"):
-            models.append({"name": "best.pt", "label": "🎯 Fine-Tuned Model (best.pt)", "type": "finetuned"})
+            models.append({"name": "best.pt", "label": "🎯 Fine-Tuned Custom Model (best.pt)", "type": "finetuned"})
             
+        known_labels = {
+            "yolo26n.pt": "⚡ YOLO26 Nano (yolo26n.pt) - NMS-Free Ultra Fast",
+            "yolo26s.pt": "⚡ YOLO26 Small (yolo26s.pt) - Balanced 2026",
+            "yolo26m.pt": "⚡ YOLO26 Medium (yolo26m.pt) - High Accuracy",
+            "yolov11n.pt": "🚀 YOLOv11 Nano (yolov11n.pt)",
+            "yolo11s.pt": "🚀 YOLOv11 Small (yolo11s.pt)",
+            "yolo11m.pt": "🚀 YOLOv11 Medium (yolo11m.pt)",
+            "yolo11l.pt": "🚀 YOLOv11 Large (yolo11l.pt)",
+            "yolo11x.pt": "🚀 YOLOv11 XLarge (yolo11x.pt)",
+            "yolov8n.pt": "📦 YOLOv8 Nano (yolov8n.pt)"
+        }
+
+        # Add models found in project folder
         for f in sorted(os.listdir(".")):
             if f.endswith(".pt") and f != "best.pt":
-                models.append({"name": f, "label": f, "type": "standard"})
+                label = known_labels.get(f, f"🧠 Model: {f}")
+                models.append({"name": f, "label": label, "type": "standard"})
                 
+        # If yolo26 models not yet downloaded locally, offer them in list
+        for m_name in ["yolo26n.pt", "yolo26s.pt"]:
+            if not any(m["name"] == m_name for m in models):
+                models.append({"name": m_name, "label": known_labels.get(m_name, m_name), "type": "remote"})
+
         return models
 
     @staticmethod

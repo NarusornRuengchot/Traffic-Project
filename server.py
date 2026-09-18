@@ -16,8 +16,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ai_engine import AITrafficEngine, get_traffic_level
+from database import db_manager
 
-app = FastAPI(title="KU SRC Smart Traffic WebSocket Service", version="2.1.0")
+app = FastAPI(title="KU SRC Smart Traffic WebSocket Service", version="2.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -137,6 +138,44 @@ async def get_calibration_preview(
     
     info["preview"] = preview_base64
     return info
+
+
+# ==========================================
+# Database REST API (phpMyAdmin / MySQL)
+# ==========================================
+@app.get("/api/db/status")
+async def get_database_status():
+    return db_manager.get_status()
+
+
+@app.get("/api/db/sessions")
+async def get_database_sessions(limit: int = Query(50, ge=1, le=200)):
+    sessions = db_manager.get_all_sessions(limit=limit)
+    return {"sessions": sessions, "status": db_manager.get_status()}
+
+
+@app.get("/api/db/sessions/{session_id}")
+async def get_database_session_detail(session_id: int):
+    detail = db_manager.get_session_details(session_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail=f"Session #{session_id} not found")
+    return detail
+
+
+@app.delete("/api/db/sessions/{session_id}")
+async def delete_database_session(session_id: int):
+    success = db_manager.delete_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Session #{session_id} could not be deleted")
+    return {"status": "success", "deleted_id": session_id}
+
+
+@app.post("/api/db/save")
+async def manual_save_session(payload: Dict[str, Any]):
+    session_id = db_manager.save_analysis_session(payload)
+    if not session_id:
+        raise HTTPException(status_code=500, detail="Failed to save session to database")
+    return {"status": "success", "session_id": session_id, "db_type": db_manager.db_type}
 
 
 @app.websocket("/ws/traffic")
@@ -268,8 +307,44 @@ async def websocket_traffic_endpoint(websocket: WebSocket):
                 last_yield_time = time.time()
 
             summary_data = session_engine.generate_summary_table(start_dt)
+            
+            # Calculate max congestion level and avg density
+            max_cong = "คล่องตัว (Smooth)"
+            if summary_data:
+                cong_levels = [row.get("Congestion Level", "") for row in summary_data]
+                if any("ติดขัดหนาแน่นมาก" in c for c in cong_levels):
+                    max_cong = "ติดขัดหนาแน่นมาก (Very Heavy Congestion)"
+                elif any("ติดขัดปานกลาง" in c for c in cong_levels):
+                    max_cong = "ติดขัดปานกลาง (Moderate Congestion)"
+                elif any("เริ่มชะลอตัว" in c for c in cong_levels):
+                    max_cong = "เริ่มชะลอตัว (Slow Moving)"
+
+            avg_dense = sum(session_engine.density_history) / max(1, len(session_engine.density_history)) if session_engine.density_history else 0.0
+
+            # Auto-save session to MySQL / database
+            saved_session_id = None
+            try:
+                saved_session_id = db_manager.save_analysis_session({
+                    "video_name": os.path.basename(video_path),
+                    "video_recorded_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "model_used": session_engine.model_name,
+                    "total_vehicles": session_engine.inbound_count + session_engine.outbound_count,
+                    "inbound_count": session_engine.inbound_count,
+                    "outbound_count": session_engine.outbound_count,
+                    "max_congestion_level": max_cong,
+                    "avg_density": avg_dense,
+                    "stall_ratio": session_engine.stall_ratio,
+                    "class_counts": session_engine.class_counts,
+                    "summary_table": summary_data,
+                    "events_log": session_engine.events_log
+                })
+            except Exception as dbe:
+                print(f"Database auto-save error: {dbe}")
+
             await websocket.send_json({
                 "type": "finished",
+                "session_id": saved_session_id,
+                "db_status": db_manager.get_status(),
                 "total_inbound": session_engine.inbound_count,
                 "total_outbound": session_engine.outbound_count,
                 "total_vehicles": session_engine.inbound_count + session_engine.outbound_count,

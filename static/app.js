@@ -22,6 +22,7 @@ class TrafficWebSocketApp {
         this.initEventListeners();
         this.loadAvailableModelsAndDevices();
         this.loadAvailableVideos();
+        this.checkDatabaseStatus();
         this.connectWebSocket();
     }
 
@@ -30,6 +31,23 @@ class TrafficWebSocketApp {
         this.statusDotEl = this.wsStatusEl.querySelector(".status-dot");
         this.statusTextEl = this.wsStatusEl.querySelector(".status-text");
         this.themeToggleBtn = document.getElementById("themeToggleBtn");
+
+        // Database Elements
+        this.dbStatusBadge = document.getElementById("dbStatusBadge");
+        this.dbStatusText = document.getElementById("dbStatusText");
+        this.historyModalBtn = document.getElementById("historyModalBtn");
+        this.historyModal = document.getElementById("historyModal");
+        this.closeHistoryBtn = document.getElementById("closeHistoryBtn");
+        this.closeHistoryFooterBtn = document.getElementById("closeHistoryFooterBtn");
+        this.refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+        this.historySearchInput = document.getElementById("historySearchInput");
+        this.historyTableBody = document.getElementById("historyTableBody");
+        this.dbInfoSubtitle = document.getElementById("dbInfoSubtitle");
+        this.sessionDetailContainer = document.getElementById("sessionDetailContainer");
+        this.closeDetailBtn = document.getElementById("closeDetailBtn");
+        this.detailTitle = document.getElementById("detailTitle");
+        this.detailMetaGrid = document.getElementById("detailMetaGrid");
+        this.detailIntervalsBody = document.getElementById("detailIntervalsBody");
 
         // Controls
         this.videoSelect = document.getElementById("videoSelect");
@@ -221,6 +239,23 @@ class TrafficWebSocketApp {
         this.pauseBtn.addEventListener("click", () => this.togglePause());
         this.stopBtn.addEventListener("click", () => this.stopAnalysis());
         this.downloadCsvBtn.addEventListener("click", () => this.downloadCSV());
+
+        // Database & History Modal Listenners
+        this.historyModalBtn.addEventListener("click", () => this.openHistoryModal());
+        this.closeHistoryBtn.addEventListener("click", () => this.closeHistoryModal());
+        this.closeHistoryFooterBtn.addEventListener("click", () => this.closeHistoryModal());
+        this.refreshHistoryBtn.addEventListener("click", () => this.loadHistoryRecords());
+        this.closeDetailBtn.addEventListener("click", () => {
+            this.sessionDetailContainer.style.display = "none";
+        });
+        this.historySearchInput.addEventListener("input", (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            this.filterHistoryTable(query);
+        });
+        // Close modal on backdrop click
+        this.historyModal.addEventListener("click", (e) => {
+            if (e.target === this.historyModal) this.closeHistoryModal();
+        });
     }
 
     async loadAvailableModelsAndDevices() {
@@ -376,6 +411,10 @@ class TrafficWebSocketApp {
                 this.renderSummaryTable(msg.summary_table || []);
                 this.summarySection.style.display = "block";
                 this.fpsBadge.textContent = "FPS: 0.0";
+                
+                if (msg.session_id) {
+                    console.log(`✅ Session #${msg.session_id} auto-saved to Database.`);
+                }
                 break;
 
             case "error":
@@ -562,6 +601,186 @@ class TrafficWebSocketApp {
         a.download = "KU_SRC_traffic_websocket_report.csv";
         a.click();
         URL.revokeObjectURL(url);
+    }
+
+    // ==========================================
+    // Database & History (phpMyAdmin / MySQL)
+    // ==========================================
+    async checkDatabaseStatus() {
+        try {
+            const res = await fetch("/api/db/status");
+            const data = await res.json();
+            
+            if (data.db_type && data.db_type.includes("MySQL")) {
+                this.dbStatusBadge.className = "db-status";
+                this.dbStatusText.textContent = `🟢 MySQL (phpMyAdmin)`;
+                this.dbInfoSubtitle.textContent = `Database: ${data.database} | Host: ${data.host}:${data.port} | User: ${data.user}`;
+            } else {
+                this.dbStatusBadge.className = "db-status fallback";
+                this.dbStatusText.textContent = `🟡 ${data.db_type || 'Local DB'}`;
+                this.dbInfoSubtitle.textContent = `Storage: Local SQLite | MySQL Offline (Start MySQL in XAMPP / phpMyAdmin)`;
+            }
+        } catch (err) {
+            this.dbStatusBadge.className = "db-status offline";
+            this.dbStatusText.textContent = `🔴 DB Offline`;
+            console.error("DB Status check failed:", err);
+        }
+    }
+
+    openHistoryModal() {
+        this.historyModal.style.display = "flex";
+        this.checkDatabaseStatus();
+        this.loadHistoryRecords();
+    }
+
+    closeHistoryModal() {
+        this.historyModal.style.display = "none";
+        this.sessionDetailContainer.style.display = "none";
+    }
+
+    async loadHistoryRecords() {
+        this.historyTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 2rem;">กำลังดึงข้อมูลประวัติจากฐานข้อมูล...</td></tr>`;
+        try {
+            const res = await fetch("/api/db/sessions?limit=50");
+            const data = await res.json();
+            this.cachedSessions = data.sessions || [];
+            this.renderHistoryTable(this.cachedSessions);
+        } catch (err) {
+            this.historyTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#ef4444; padding: 2rem;">เกิดข้อผิดพลาดในการโหลดข้อมูล: ${err.message}</td></tr>`;
+        }
+    }
+
+    renderHistoryTable(sessions) {
+        if (!sessions || sessions.length === 0) {
+            this.historyTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 2rem; color:var(--text-muted);">ยังไม่มีประวัติการวิเคราะห์ที่บันทึกไว้</td></tr>`;
+            return;
+        }
+
+        this.historyTableBody.innerHTML = "";
+        sessions.forEach(s => {
+            const tr = document.createElement("tr");
+            tr.dataset.video = (s.video_name || "").toLowerCase();
+            tr.dataset.congestion = (s.max_congestion_level || "").toLowerCase();
+
+            let congBadgeClass = "badge-smooth";
+            if (s.max_congestion_level && s.max_congestion_level.includes("หนาแน่นมาก")) congBadgeClass = "badge-jam";
+            else if (s.max_congestion_level && s.max_congestion_level.includes("ปานกลาง")) congBadgeClass = "badge-moderate";
+            else if (s.max_congestion_level && s.max_congestion_level.includes("ชะลอตัว")) congBadgeClass = "badge-slow";
+
+            tr.innerHTML = `
+                <td><strong>#${s.id}</strong></td>
+                <td><code>${s.video_name}</code></td>
+                <td>${s.video_recorded_time || '-'}</td>
+                <td><strong style="color:var(--accent-blue);">${s.total_vehicles}</strong></td>
+                <td>🔵 ${s.inbound_count}</td>
+                <td>🟠 ${s.outbound_count}</td>
+                <td><span class="badge ${congBadgeClass}">${s.max_congestion_level || 'คล่องตัว'}</span></td>
+                <td>${s.analysis_timestamp || '-'}</td>
+                <td>
+                    <div class="action-btn-group">
+                        <button class="btn-action-view" onclick="window.app.viewSessionDetail(${s.id})">🔍 ดูข้อมูล</button>
+                        <button class="btn-action-delete" onclick="window.app.deleteSession(${s.id})">🗑️ ลบ</button>
+                    </div>
+                </td>
+            `;
+            this.historyTableBody.appendChild(tr);
+        });
+    }
+
+    filterHistoryTable(query) {
+        const rows = this.historyTableBody.querySelectorAll("tr");
+        rows.forEach(row => {
+            const video = row.dataset.video || "";
+            const cong = row.dataset.congestion || "";
+            if (!query || video.includes(query) || cong.includes(query)) {
+                row.style.display = "";
+            } else {
+                row.style.display = "none";
+            }
+        });
+    }
+
+    async viewSessionDetail(sessionId) {
+        try {
+            const res = await fetch(`/api/db/sessions/${sessionId}`);
+            if (!res.ok) throw new Error("Could not fetch session details");
+            const data = await res.json();
+
+            this.detailTitle.textContent = `📊 รายละเอียดการวิเคราะห์ Session #${data.id} - ${data.video_name}`;
+            
+            this.detailMetaGrid.innerHTML = `
+                <div class="meta-item">
+                    <div class="meta-item-label">เวลาที่ถ่ายคลิป</div>
+                    <div class="meta-item-val">${data.video_recorded_time || '-'}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-item-label">ยอดรถรวม</div>
+                    <div class="meta-item-val" style="color:var(--accent-blue);">${data.total_vehicles} คัน</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-item-label">ขาเข้า / ขาออก</div>
+                    <div class="meta-item-val">🔵 ${data.inbound_count} / 🟠 ${data.outbound_count}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-item-label">ทิศทางหลัก</div>
+                    <div class="meta-item-val">${data.dominant_direction}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-item-label">โมเดลที่ใช้</div>
+                    <div class="meta-item-val"><code>${data.model_used}</code></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-item-label">จำแนกประเภทยานพาหนะ</div>
+                    <div class="meta-item-val" style="font-size:0.8rem;">
+                        🚗 Car: ${data.class_counts?.Car || 0} | 🏍️ Moto: ${data.class_counts?.Motorcycle || 0}<br>
+                        🚌 Bus: ${data.class_counts?.Bus || 0} | 🚚 Truck: ${data.class_counts?.Truck || 0}
+                    </div>
+                </div>
+            `;
+
+            this.detailIntervalsBody.innerHTML = "";
+            if (data.intervals && data.intervals.length > 0) {
+                data.intervals.forEach(intv => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td><strong>${intv.time_window}</strong></td>
+                        <td>${intv.inbound}</td>
+                        <td>${intv.outbound}</td>
+                        <td>${intv.total}</td>
+                        <td>${(intv.stall_ratio * 100).toFixed(0)}%</td>
+                        <td>${intv.congestion_level}</td>
+                    `;
+                    this.detailIntervalsBody.appendChild(row);
+                });
+            } else {
+                this.detailIntervalsBody.innerHTML = `<tr><td colspan="6" style="text-align:center;">ไม่มีข้อมูล Interval</td></tr>`;
+            }
+
+            this.sessionDetailContainer.style.display = "block";
+            this.sessionDetailContainer.scrollIntoView({ behavior: "smooth" });
+        } catch (err) {
+            alert(`ไม่สามารถโหลดรายละเอียด session: ${err.message}`);
+        }
+    }
+
+    async deleteSession(sessionId) {
+        if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลการวิเคราะห์ Session #${sessionId} จากฐานข้อมูล?`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/db/sessions/${sessionId}`, { method: "DELETE" });
+            if (res.ok) {
+                if (this.sessionDetailContainer.style.display !== "none") {
+                    this.sessionDetailContainer.style.display = "none";
+                }
+                this.loadHistoryRecords();
+            } else {
+                alert("ไม่สามารถลบข้อมูลได้");
+            }
+        } catch (err) {
+            alert(`เกิดข้อผิดพลาดในการลบ: ${err.message}`);
+        }
     }
 }
 
