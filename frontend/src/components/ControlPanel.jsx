@@ -413,6 +413,49 @@ export function ControlPanel({
           })}
         </div>
       </div>
+
+      <hr style={{ borderColor: 'var(--border-color)', margin: '4px 0' }} />
+
+      {/* Speed & Incident Settings */}
+      <div>
+        <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>
+          🏎️ Speed & Safety Calibration
+        </label>
+
+        {/* Speed Limit Slider */}
+        <div style={{ marginBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Speed Limit</span>
+            <span style={{ fontFamily: 'var(--font-mono)', color: '#ec4899', fontWeight: '700' }}>
+              {config.speed_limit_kmh || 50} km/h
+            </span>
+          </div>
+          <input
+            type="range"
+            min="20"
+            max="90"
+            step="5"
+            value={config.speed_limit_kmh || 50}
+            onChange={(e) => onChangeConfig('speed_limit_kmh', parseFloat(e.target.value))}
+          />
+        </div>
+
+        {/* Pixel-to-meter Scale */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Distance Scale (px/m)</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{config.pixels_per_meter || 22} px/m</span>
+          </div>
+          <input
+            type="range"
+            min="10"
+            max="45"
+            step="1"
+            value={config.pixels_per_meter || 22}
+            onChange={(e) => onChangeConfig('pixels_per_meter', parseFloat(e.target.value))}
+          />
+        </div>
+      </div>
     </div>
   );
 }

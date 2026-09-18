@@ -42,7 +42,8 @@ class LaneCounter:
         timestamp_sec: float,
         real_time_full_str: str,
         traffic_level_str: str,
-        frame_width: Optional[int] = None
+        frame_width: Optional[int] = None,
+        speeds: Optional[Dict[int, float]] = None
     ) -> Tuple[List[Dict[str, Any]], List[Tuple[Tuple[int, int], Tuple[int, int]]]]:
         """
         Calculates line crossover and updates counts.
@@ -97,12 +98,14 @@ class LaneCounter:
                         else:
                             self.class_counts[class_name] = 1
 
+                        speed_val = round(speeds.get(track_id, 0.0), 1) if speeds else 0.0
                         event = {
                             "Timestamp (s)": round(timestamp_sec, 2),
                             "Real-world Time": real_time_full_str,
                             "Vehicle ID": track_id,
                             "Type": class_name,
                             "Direction": direction,
+                            "Speed (km/h)": speed_val,
                             "Traffic Level": traffic_level_str
                         }
                         self.events_log.append(event)

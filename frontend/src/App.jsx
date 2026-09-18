@@ -7,6 +7,7 @@ import { VehicleBreakdown } from './components/VehicleBreakdown';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { EventLogTable } from './components/EventLogTable';
 import { HistoryReport } from './components/HistoryReport';
+import { IncidentAlerts } from './components/IncidentAlerts';
 import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
 import { api } from './services/api';
 
@@ -26,6 +27,8 @@ export default function App() {
     line_y_ratio: 0.50,
     mid_x_ratio: 0.45,
     swap_directions: false,
+    speed_limit_kmh: 50,
+    pixels_per_meter: 22,
     target_classes: ['Car', 'Motorcycle', 'Bus', 'Truck']
   });
 
@@ -203,6 +206,9 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              {/* Real-time Incident Alerts Drawer */}
+              <IncidentAlerts incidents={telemetry?.active_incidents || []} />
 
               <VideoPlayer
                 currentFrame={currentFrame}

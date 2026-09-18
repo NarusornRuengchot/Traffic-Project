@@ -56,6 +56,8 @@ class StreamWorker:
         self.mid_x_ratio: float = 0.45
         self.swap_directions: bool = False
         self.conf_threshold: float = 0.25
+        self.speed_limit_kmh: float = 50.0
+        self.pixels_per_meter: float = 22.0
 
         # Bounded frame buffer with drop-oldest policy (prevents WebSocket lag)
         self.frame_queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
@@ -170,6 +172,10 @@ class StreamWorker:
                 self.swap_directions = bool(cfg["swap_directions"])
             if "target_classes" in cfg:
                 self.engine.update_target_classes(cfg["target_classes"])
+            if "speed_limit_kmh" in cfg:
+                self.speed_limit_kmh = float(cfg["speed_limit_kmh"])
+            if "pixels_per_meter" in cfg:
+                self.pixels_per_meter = float(cfg["pixels_per_meter"])
 
     def stop(self):
         """Signals the worker thread to terminate and cleans up."""
@@ -223,6 +229,8 @@ class StreamWorker:
                 line_y = self.line_y_ratio
                 mid_x = self.mid_x_ratio
                 swap_dir = self.swap_directions
+                sp_limit = self.speed_limit_kmh
+                px_per_m = self.pixels_per_meter
 
             # Optimal image resize for web delivery
             h, w = frame.shape[:2]
@@ -241,7 +249,9 @@ class StreamWorker:
                     line_y_ratio=line_y,
                     mid_x_ratio=mid_x,
                     swap_directions=swap_dir,
-                    img_size=self.inference_size
+                    img_size=self.inference_size,
+                    speed_limit_kmh=sp_limit,
+                    pixels_per_meter=px_per_m
                 )
                 telemetry["is_live"] = self.is_live
 
@@ -254,6 +264,15 @@ class StreamWorker:
                     except Exception as db_err:
                         print(f"⚠️ DB log_events error: {db_err}")
 
+                # Persist traffic incidents to SQLite database
+                new_incidents = telemetry.get("new_incidents")
+                if new_incidents:
+                    try:
+                        from src.database.db_manager import db_manager
+                        db_manager.log_incidents_batch(new_incidents, session_id=os.path.basename(str(self.video_path or "live")))
+                    except Exception as db_err:
+                        print(f"⚠️ DB log_incidents error: {db_err}")
+
                 # Periodic density snapshot (every ~5 seconds = 150 frames)
                 if curr_idx % 150 == 0:
                     try:
@@ -263,6 +282,7 @@ class StreamWorker:
                             density_score=telemetry.get("density_score", 0.0),
                             traffic_level=telemetry.get("traffic_level_th", "คล่องตัว"),
                             stall_ratio=telemetry.get("stall_ratio", 0.0),
+                            avg_speed_kmh=telemetry.get("avg_speed_kmh", 0.0),
                             session_id=os.path.basename(str(self.video_path or "live"))
                         )
                     except Exception as db_err:

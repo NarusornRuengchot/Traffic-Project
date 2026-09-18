@@ -8,6 +8,8 @@ from src.core.vehicle_detector import VehicleDetector
 from src.core.vehicle_tracker import VehicleTracker
 from src.core.lane_counter import LaneCounter
 from src.core.analytics import TrafficAnalytics, evaluate_traffic_level
+from src.core.speed_estimator import SpeedEstimator
+from src.core.incident_detector import IncidentDetector
 from src.visualizer.annotator import FrameAnnotator
 from src.utils.file_helper import resolve_model_path, list_available_models, list_available_videos
 from src.schema.telemetry import CalibrationConfig
@@ -15,7 +17,7 @@ from src.schema.telemetry import CalibrationConfig
 class TrafficPipeline:
     """
     Unified modular AI Traffic pipeline combining detection, tracking,
-    crossover counting, congestion analytics, and HUD visualization.
+    crossover counting, speed estimation, incident detection, congestion analytics, and HUD.
     """
     def __init__(
         self,
@@ -34,6 +36,8 @@ class TrafficPipeline:
         self.tracker = VehicleTracker()
         self.counter = LaneCounter()
         self.analytics = TrafficAnalytics()
+        self.speed_estimator = SpeedEstimator()
+        self.incident_detector = IncidentDetector()
         self.annotator = FrameAnnotator()
 
     @property
@@ -64,6 +68,8 @@ class TrafficPipeline:
         self.tracker.reset()
         self.counter.reset()
         self.analytics.reset()
+        self.speed_estimator.reset()
+        self.incident_detector.reset()
 
     def load_model(self, model_name: str):
         self.detector.load_model(model_name)
@@ -175,14 +181,18 @@ class TrafficPipeline:
         swap_directions: bool = False,
         img_size: int = 640,
         device: str = "cpu",
-        tracker_cfg: str = "custom_tracker.yaml"
+        tracker_cfg: str = "custom_tracker.yaml",
+        speed_limit_kmh: float = 50.0,
+        pixels_per_meter: float = 22.0
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Executes complete frame processing: detection, tracking, crossover math,
-        telemetry computation, and HUD annotation.
+        speed estimation, incident detection, telemetry computation, and HUD annotation.
         """
         self.detector.set_img_size(img_size)
         self.detector.set_device(device)
+        self.speed_estimator.set_calibration_scale(pixels_per_meter)
+        self.incident_detector.set_speed_limit(speed_limit_kmh)
 
         height, width = frame.shape[:2]
         line_y = int(height * line_y_ratio)
@@ -223,7 +233,30 @@ class TrafficPipeline:
             frame_idx=frame_idx
         )
 
-        # 4. Rolling Density & Congestion level
+        # 4. Centroids & Real-time Speed Estimation
+        centroids = []
+        for box in boxes_xyxy:
+            cx = int((box[0] + box[2]) / 2)
+            cy = int((box[1] + box[3]) / 2)
+            centroids.append((cx, cy))
+
+        c_names = [self.detector.id_to_name.get(cls_id, "Vehicle") for cls_id in class_indices]
+
+        speeds_map: Dict[int, float] = {}
+        speeds_list: List[float] = []
+        for tid, pt in zip(active_ids, centroids):
+            sp = self.speed_estimator.update(tid, pt, frame_idx, fps)
+            speeds_map[tid] = sp
+            speeds_list.append(sp)
+
+        self.speed_estimator.prune_lost_tracks(active_ids)
+
+        moving_speeds = [s for s in speeds_list if s > 2.0]
+        avg_speed = round(float(np.mean(moving_speeds)), 1) if moving_speeds else (
+            round(float(np.mean(speeds_list)), 1) if speeds_list else 0.0
+        )
+
+        # 5. Rolling Density & Congestion level
         rolling_density, rolling_inbound, rolling_outbound = self.analytics.update_rolling_stats(
             active_count=active_count,
             inbound_active=inbound_active,
@@ -231,7 +264,7 @@ class TrafficPipeline:
         )
         traffic_level = evaluate_traffic_level(rolling_density, stall_ratio)
 
-        # 5. Real-world Timestamps
+        # 6. Real-world Timestamps
         timestamp_sec = frame_idx / fps if fps > 0 else 0.0
         if start_datetime is None:
             current_real_time = datetime.datetime.now()
@@ -240,7 +273,21 @@ class TrafficPipeline:
         real_time_str = current_real_time.strftime("%H:%M:%S")
         real_time_full_str = current_real_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        # 6. Tripwire Counting
+        # 7. Incident & Anomaly Detection
+        new_incidents = self.incident_detector.check_incidents(
+            track_ids=active_ids,
+            centroids=centroids,
+            speeds=speeds_list,
+            class_names=c_names,
+            mid_x=mid_x,
+            swap_directions=swap_directions,
+            current_time_sec=timestamp_sec,
+            real_time_str=real_time_str,
+            fps=fps
+        )
+        incident_ids = {inc["vehicle_id"] for inc in self.incident_detector.active_incidents}
+
+        # 8. Tripwire Counting with Speed
         new_events, triggered_lines = self.counter.check_crossovers(
             boxes_xyxy=boxes_xyxy,
             track_ids=active_ids,
@@ -253,10 +300,20 @@ class TrafficPipeline:
             timestamp_sec=timestamp_sec,
             real_time_full_str=real_time_full_str,
             traffic_level_str=f"{traffic_level.emoji} {traffic_level.thai_desc}",
-            frame_width=width
+            frame_width=width,
+            speeds=speeds_map
         )
 
-        # 7. Draw Visual Overlays & Tripwires
+        # 9. Draw Visual Overlays, Badges & HUD
+        annotated_frame = FrameAnnotator.draw_vehicle_badges(
+            frame=annotated_frame,
+            boxes_xyxy=boxes_xyxy,
+            track_ids=active_ids,
+            speeds=speeds_map,
+            speed_limit_kmh=speed_limit_kmh,
+            incident_vehicle_ids=incident_ids
+        )
+
         inbound_color = (0, 0, 255) if ((0, line_y), (mid_x, line_y)) in triggered_lines else (255, 255, 0)
         outbound_color = (0, 0, 255) if ((mid_x, line_y), (width, line_y)) in triggered_lines else (0, 165, 255)
 
@@ -276,10 +333,12 @@ class TrafficPipeline:
             real_time_str=real_time_str,
             traffic_level_en=traffic_level.english_name,
             traffic_level_color=traffic_level.color_rgb,
-            swap_directions=swap_directions
+            swap_directions=swap_directions,
+            avg_speed=avg_speed,
+            incident_count=len(self.incident_detector.active_incidents)
         )
 
-        # 8. Build Telemetry Data Dictionary
+        # 10. Build Telemetry Data Dictionary
         telemetry = {
             "time_sec": round(timestamp_sec, 1),
             "real_time": real_time_str,
@@ -292,12 +351,15 @@ class TrafficPipeline:
             "outbound_active": round(rolling_outbound, 1),
             "stall_ratio": round(stall_ratio, 2),
             "density_score": round(rolling_density, 2),
+            "avg_speed_kmh": avg_speed,
             "traffic_level_th": traffic_level.thai_desc,
             "traffic_level_en": traffic_level.english_name,
             "traffic_level_emoji": traffic_level.emoji,
             "traffic_level_color": traffic_level.color_hex,
             "class_counts": self.counter.class_counts.copy(),
-            "new_events": new_events
+            "new_events": new_events,
+            "new_incidents": new_incidents,
+            "active_incidents": self.incident_detector.active_incidents[-5:]
         }
 
         self.analytics.record_telemetry(telemetry)

@@ -43,11 +43,18 @@ class DatabaseManager:
                     vehicle_id INTEGER NOT NULL,
                     vehicle_type TEXT NOT NULL,
                     direction TEXT NOT NULL,
+                    speed_kmh REAL DEFAULT 0.0,
                     traffic_level TEXT NOT NULL,
                     session_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+
+            # Safe migration for existing DB
+            try:
+                conn.execute("ALTER TABLE vehicle_events ADD COLUMN speed_kmh REAL DEFAULT 0.0;")
+            except Exception:
+                pass
 
             # 2. Periodic traffic density snapshot table
             conn.execute("""
@@ -60,6 +67,31 @@ class DatabaseManager:
                     density_score REAL NOT NULL,
                     traffic_level TEXT NOT NULL,
                     stall_ratio REAL DEFAULT 0.0,
+                    avg_speed_kmh REAL DEFAULT 0.0,
+                    session_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            try:
+                conn.execute("ALTER TABLE traffic_snapshots ADD COLUMN avg_speed_kmh REAL DEFAULT 0.0;")
+            except Exception:
+                pass
+
+            # 3. Traffic incidents and anomalies table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS traffic_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp_sec REAL,
+                    real_time TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    hour INTEGER NOT NULL,
+                    incident_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    vehicle_id INTEGER NOT NULL,
+                    vehicle_type TEXT NOT NULL,
+                    speed_kmh REAL DEFAULT 0.0,
+                    message TEXT,
                     session_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -70,6 +102,8 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON vehicle_events(vehicle_type);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_direction ON vehicle_events(direction);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON traffic_snapshots(date);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_date ON traffic_incidents(date);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_type ON traffic_incidents(incident_type);")
             conn.commit()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -86,6 +120,7 @@ class DatabaseManager:
         vehicle_type: str,
         direction: str,
         traffic_level: str,
+        speed_kmh: float = 0.0,
         timestamp_sec: float = 0.0,
         real_time_str: Optional[str] = None,
         session_id: str = "default"
@@ -104,11 +139,11 @@ class DatabaseManager:
         cursor.execute("""
             INSERT INTO vehicle_events (
                 timestamp_sec, real_time, date, hour, vehicle_id,
-                vehicle_type, direction, traffic_level, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                vehicle_type, direction, speed_kmh, traffic_level, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             timestamp_sec, dt_str, date_str, hour, vehicle_id,
-            vehicle_type, direction, traffic_level, session_id
+            vehicle_type, direction, speed_kmh, traffic_level, session_id
         ))
         conn.commit()
         return cursor.lastrowid
@@ -128,6 +163,8 @@ class DatabaseManager:
             except Exception:
                 hour = now.hour
 
+            speed_val = float(ev.get("Speed (km/h)", ev.get("speed_kmh", 0.0)))
+
             rows.append((
                 float(ev.get("Timestamp (s)", 0.0)),
                 dt_str,
@@ -136,6 +173,7 @@ class DatabaseManager:
                 int(ev.get("Vehicle ID", 0)),
                 str(ev.get("Type", "Car")),
                 str(ev.get("Direction", "Inbound")),
+                speed_val,
                 str(ev.get("Traffic Level", "🟢 คล่องตัว")),
                 session_id
             ))
@@ -145,8 +183,82 @@ class DatabaseManager:
         cursor.executemany("""
             INSERT INTO vehicle_events (
                 timestamp_sec, real_time, date, hour, vehicle_id,
-                vehicle_type, direction, traffic_level, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                vehicle_type, direction, speed_kmh, traffic_level, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, rows)
+        conn.commit()
+        return len(rows)
+
+    def log_incident(
+        self,
+        incident_type: str,
+        severity: str,
+        vehicle_id: int,
+        vehicle_type: str,
+        speed_kmh: float = 0.0,
+        message: str = "",
+        timestamp_sec: float = 0.0,
+        real_time_str: Optional[str] = None,
+        session_id: str = "default"
+    ) -> int:
+        """Logs a single traffic incident (wrong-way, stalled, speeding)."""
+        now = datetime.datetime.now()
+        dt_str = real_time_str or now.strftime("%Y-%m-%d %H:%M:%S")
+        date_str = dt_str.split(" ")[0]
+        try:
+            hour = int(dt_str.split(" ")[1].split(":")[0])
+        except Exception:
+            hour = now.hour
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO traffic_incidents (
+                timestamp_sec, real_time, date, hour, incident_type,
+                severity, vehicle_id, vehicle_type, speed_kmh, message, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (
+            timestamp_sec, dt_str, date_str, hour, incident_type,
+            severity, vehicle_id, vehicle_type, speed_kmh, message, session_id
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+    def log_incidents_batch(self, incidents: List[Dict[str, Any]], session_id: str = "default") -> int:
+        """Batch inserts multiple traffic incidents inside a single transaction."""
+        if not incidents:
+            return 0
+        now = datetime.datetime.now()
+        rows = []
+        for inc in incidents:
+            dt_str = inc.get("real_time") or now.strftime("%Y-%m-%d %H:%M:%S")
+            date_str = dt_str.split(" ")[0]
+            try:
+                hour = int(dt_str.split(" ")[1].split(":")[0])
+            except Exception:
+                hour = now.hour
+
+            rows.append((
+                float(inc.get("timestamp_sec", 0.0)),
+                dt_str,
+                date_str,
+                hour,
+                str(inc.get("incident_type", "unknown")),
+                str(inc.get("severity", "medium")),
+                int(inc.get("vehicle_id", 0)),
+                str(inc.get("vehicle_type", "Vehicle")),
+                float(inc.get("speed_kmh", 0.0)),
+                str(inc.get("message", "")),
+                session_id
+            ))
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.executemany("""
+            INSERT INTO traffic_incidents (
+                timestamp_sec, real_time, date, hour, incident_type,
+                severity, vehicle_id, vehicle_type, speed_kmh, message, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, rows)
         conn.commit()
         return len(rows)
@@ -157,6 +269,7 @@ class DatabaseManager:
         density_score: float,
         traffic_level: str,
         stall_ratio: float = 0.0,
+        avg_speed_kmh: float = 0.0,
         session_id: str = "default"
     ) -> int:
         """Logs an aggregated traffic state snapshot."""
@@ -170,11 +283,11 @@ class DatabaseManager:
         cursor.execute("""
             INSERT INTO traffic_snapshots (
                 timestamp, date, hour, active_vehicles, density_score,
-                traffic_level, stall_ratio, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                traffic_level, stall_ratio, avg_speed_kmh, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             dt_str, date_str, hour, active_vehicles, density_score,
-            traffic_level, stall_ratio, session_id
+            traffic_level, stall_ratio, avg_speed_kmh, session_id
         ))
         conn.commit()
         return cursor.lastrowid
@@ -355,7 +468,7 @@ class DatabaseManager:
         events_query = f"""
             SELECT
                 id, timestamp_sec, real_time, date, hour,
-                vehicle_id, vehicle_type, direction, traffic_level, session_id
+                vehicle_id, vehicle_type, direction, speed_kmh, traffic_level, session_id
             FROM vehicle_events
             {where_clause}
             ORDER BY id DESC
@@ -364,6 +477,91 @@ class DatabaseManager:
         cursor.execute(events_query, params + [limit, offset])
         events = [dict(row) for row in cursor.fetchall()]
         return events, total_records
+
+    def get_incidents_history(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        target_date: Optional[str] = None,
+        incident_type: Optional[str] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieves paginated history of traffic incidents with filtering.
+        Returns: (incidents_list, total_count)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        conditions = []
+        params = []
+        if target_date:
+            conditions.append("date = ?")
+            params.append(target_date)
+        if incident_type and incident_type != "All":
+            conditions.append("incident_type = ?")
+            params.append(incident_type)
+
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        cursor.execute(f"SELECT COUNT(*) AS total FROM traffic_incidents {where_clause};", params)
+        total_records = cursor.fetchone()["total"]
+
+        cursor.execute(f"""
+            SELECT id, timestamp_sec, real_time, date, hour, incident_type,
+                   severity, vehicle_id, vehicle_type, speed_kmh, message, session_id
+            FROM traffic_incidents
+            {where_clause}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?;
+        """, params + [limit, offset])
+        incidents = [dict(row) for row in cursor.fetchall()]
+        return incidents, total_records
+
+    def get_speed_analytics(self, target_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Computes average speed, max speed, and modal speed distribution.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        date_clause = "WHERE date = ? AND speed_kmh > 0" if target_date else "WHERE speed_kmh > 0"
+        params = (target_date,) if target_date else ()
+
+        cursor.execute(f"""
+            SELECT
+                COUNT(*) AS sample_count,
+                AVG(speed_kmh) AS avg_speed,
+                MAX(speed_kmh) AS max_speed,
+                MIN(speed_kmh) AS min_speed
+            FROM vehicle_events
+            {date_clause};
+        """, params)
+        summary = cursor.fetchone()
+        avg_speed = round(summary["avg_speed"], 1) if summary and summary["avg_speed"] is not None else 0.0
+        max_speed = round(summary["max_speed"], 1) if summary and summary["max_speed"] is not None else 0.0
+        min_speed = round(summary["min_speed"], 1) if summary and summary["min_speed"] is not None else 0.0
+
+        cursor.execute(f"""
+            SELECT vehicle_type, AVG(speed_kmh) AS avg_speed, MAX(speed_kmh) AS max_speed, COUNT(*) AS count
+            FROM vehicle_events
+            {date_clause}
+            GROUP BY vehicle_type;
+        """, params)
+        by_class = {
+            r["vehicle_type"]: {
+                "avg_speed": round(r["avg_speed"], 1),
+                "max_speed": round(r["max_speed"], 1),
+                "count": r["count"]
+            } for r in cursor.fetchall()
+        }
+
+        return {
+            "avg_speed": avg_speed,
+            "max_speed": max_speed,
+            "min_speed": min_speed,
+            "total_sampled": summary["sample_count"] if summary else 0,
+            "by_class": by_class
+        }
 
     def get_available_dates(self) -> List[str]:
         """Returns list of distinct dates present in the database."""
@@ -375,19 +573,20 @@ class DatabaseManager:
     def export_csv(self, target_date: Optional[str] = None) -> str:
         """Generates full CSV text of vehicle events for download/academic reporting."""
         events, _ = self.get_events_history(limit=50000, offset=0, target_date=target_date)
-        lines = ["ID,Timestamp (s),Real-world Time,Date,Hour,Vehicle ID,Vehicle Type,Direction,Traffic Level,Session ID"]
+        lines = ["ID,Timestamp (s),Real-world Time,Date,Hour,Vehicle ID,Vehicle Type,Direction,Speed (km/h),Traffic Level,Session ID"]
         for ev in events:
             lines.append(
                 f"{ev['id']},{ev['timestamp_sec']},{ev['real_time']},{ev['date']},{ev['hour']},"
-                f"{ev['vehicle_id']},{ev['vehicle_type']},{ev['direction']},\"{ev['traffic_level']}\",{ev.get('session_id', '')}"
+                f"{ev['vehicle_id']},{ev['vehicle_type']},{ev['direction']},{ev.get('speed_kmh', 0.0)},\"{ev['traffic_level']}\",{ev.get('session_id', '')}"
             )
         return "\n".join(lines)
 
     def clear_all(self):
-        """Clears all events and snapshots (useful for test resets)."""
+        """Clears all events, snapshots, and incidents (useful for test resets)."""
         with self.get_connection() as conn:
             conn.execute("DELETE FROM vehicle_events;")
             conn.execute("DELETE FROM traffic_snapshots;")
+            conn.execute("DELETE FROM traffic_incidents;")
             conn.commit()
 
 # Global Singleton Database Manager instance
