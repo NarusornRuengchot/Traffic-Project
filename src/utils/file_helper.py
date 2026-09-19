@@ -16,12 +16,15 @@ def resolve_model_path(model_name: str, search_dirs: List[str] = None) -> str:
         return model_name
 
     candidates = [model_name]
-    if "yolov11" in model_name:
+    if "yolo26" in model_name:
+        candidates.append(model_name.replace("yolo26", "yolov26"))
+    elif "yolov26" in model_name:
+        candidates.append(model_name.replace("yolov26", "yolo26"))
+    elif "yolov11" in model_name:
         candidates.append(model_name.replace("yolov11", "yolo11"))
     elif "yolo11" in model_name:
         candidates.append(model_name.replace("yolo11", "yolov11"))
-
-    if "yolov8" in model_name:
+    elif "yolov8" in model_name:
         candidates.append(model_name.replace("yolov8", "yolo8"))
     elif "yolo8" in model_name:
         candidates.append(model_name.replace("yolo8", "yolov8"))
@@ -42,9 +45,9 @@ def resolve_model_path(model_name: str, search_dirs: List[str] = None) -> str:
     return model_name
 
 def list_available_models(search_dirs: List[str] = None) -> List[Dict[str, Any]]:
-    """Scans directories for YOLO model weights."""
+    """Scans directories for YOLO model weights and categorizes them."""
     if search_dirs is None:
-        search_dirs = [".", "models"]
+        search_dirs = ["models", "."]
 
     models = []
     seen = set()
@@ -55,13 +58,22 @@ def list_available_models(search_dirs: List[str] = None) -> List[Dict[str, Any]]
         for f in sorted(os.listdir(directory)):
             if f.endswith(".pt") and f not in seen:
                 seen.add(f)
-                is_finetuned = "best" in f.lower() or "custom" in f.lower()
-                label = f"🎯 Fine-Tuned Model ({f})" if is_finetuned else f"⚡ YOLO Model: {f}"
+                f_lower = f.lower()
+                if "yolo26" in f_lower or "yolov26" in f_lower:
+                    m_type = "yolo26"
+                    label = f"🚀 YOLO26 Next-Gen (NMS-Free): {f}"
+                elif "best" in f_lower or "custom" in f_lower:
+                    m_type = "finetuned"
+                    label = f"🎯 Fine-Tuned Model: {f}"
+                else:
+                    m_type = "standard"
+                    label = f"⚡ Standard Model: {f}"
+
                 models.append({
                     "name": f,
                     "label": label,
                     "path": os.path.join(directory, f) if directory != "." else f,
-                    "type": "finetuned" if is_finetuned else "standard"
+                    "type": m_type
                 })
 
     return models

@@ -10,7 +10,9 @@ export function ControlPanel({
   modelStatus,
   testCctv,
   cctvTestResult,
-  setCctvTestResult
+  setCctvTestResult,
+  wsResources,
+  onSwitchModel
 }) {
   const [videos, setVideos] = useState([]);
   const [models, setModels] = useState([]);
@@ -18,6 +20,16 @@ export function ControlPanel({
   const [isTestingCctv, setIsTestingCctv] = useState(false);
   const [showCctvHelp, setShowCctvHelp] = useState(false);
   const [cctvUrlInput, setCctvUrlInput] = useState('');
+
+  // Synchronize resources pushed directly via WebSocket (Zero HTTP API calls)
+  useEffect(() => {
+    if (wsResources?.videos && wsResources.videos.length > 0) {
+      setVideos(wsResources.videos);
+    }
+    if (wsResources?.models && wsResources.models.length > 0) {
+      setModels(wsResources.models);
+    }
+  }, [wsResources]);
 
   useEffect(() => {
     if (config.video_path && config.video_path !== 'rtsp_stream') {
@@ -33,11 +45,12 @@ export function ControlPanel({
 
   useEffect(() => {
     async function loadResources() {
+      // Only query HTTP if WebSocket hasn't delivered resources yet
+      if (wsResources?.models && wsResources.models.length > 0) return;
       try {
         const vidData = await api.getVideos();
         if (vidData && vidData.videos && vidData.videos.length > 0) {
           setVideos(vidData.videos);
-          // If current video_path is empty or not in videos, select first available video
           const exists = vidData.videos.some((v) => v.path === config.video_path);
           if (!exists) {
             onChangeConfig('video_path', vidData.videos[0].path);
@@ -55,7 +68,7 @@ export function ControlPanel({
       }
     }
     loadResources();
-  }, []);
+  }, [wsResources]);
 
 
   const handleFileUpload = async (e) => {
@@ -288,15 +301,48 @@ export function ControlPanel({
         <select
           className="form-select"
           disabled={modelStatus?.status === 'loading'}
-          value={config.model_name || 'best.pt'}
-          onChange={(e) => onChangeConfig('model_name', e.target.value)}
+          value={config.model_name || 'yolo26n.pt'}
+          onChange={(e) => {
+            const nextModel = e.target.value;
+            onChangeConfig('model_name', nextModel);
+            if (onSwitchModel) {
+              onSwitchModel(nextModel);
+            }
+          }}
         >
-          {models.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.label}
-            </option>
-          ))}
+          {models.some((m) => m.type === 'yolo26') && (
+            <optgroup label="🚀 YOLO26 Next-Gen (NMS-Free & STAL)">
+              {models.filter((m) => m.type === 'yolo26').map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {models.some((m) => m.type === 'finetuned') && (
+            <optgroup label="🎯 Fine-Tuned Traffic Models">
+              {models.filter((m) => m.type === 'finetuned').map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {models.some((m) => m.type === 'standard') && (
+            <optgroup label="⚡ Standard Models">
+              {models.filter((m) => m.type === 'standard').map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
+        {(config.model_name?.includes('26') || config.model_name?.includes('yolo26')) && (
+          <div style={{ marginTop: '5px', fontSize: '0.72rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '500' }}>
+            <span>⚡ YOLO26 Active: NMS-Free End-to-End & Small Target Aware (STAL)</span>
+          </div>
+        )}
       </div>
 
       {/* Confidence Threshold */}

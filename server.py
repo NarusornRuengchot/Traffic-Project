@@ -74,6 +74,17 @@ app.include_router(reports_router)
 app.include_router(cctv_router)
 app.include_router(stream_router)
 
+@app.on_event("startup")
+async def on_startup():
+    """Pre-warm default YOLO AI model to eliminate cold-start lag on first video stream."""
+    try:
+        if app_state.global_engine and app_state.global_engine.detector:
+            print(f"🔥 Pre-warming default AI model ({settings.DEFAULT_MODEL}) ...")
+            app_state.global_engine.detector.warmup(settings.DEFAULT_INFERENCE_SIZE)
+            print("✅ AI Model ready for zero-latency streaming.")
+    except Exception as e:
+        print(f"⚠️ Model warmup warning: {e}")
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     """Serves compiled React frontend SPA or fallback static page."""

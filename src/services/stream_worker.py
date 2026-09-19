@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List, Tuple
 import cv2
 
 from src.core.traffic_pipeline import TrafficPipeline
+from src.database.db_manager import db_manager
 
 class StreamWorker:
     """
@@ -19,10 +20,10 @@ class StreamWorker:
     def __init__(
         self,
         engine: Optional[TrafficPipeline] = None,
-        target_width: int = 960,
+        target_width: int = 768,
         inference_size: int = 480,
-        jpeg_quality: int = 65,
-        max_queue_size: int = 2
+        jpeg_quality: int = 55,
+        max_queue_size: int = 1
     ):
         self.engine: TrafficPipeline = engine if engine is not None else TrafficPipeline()
         self.target_width = target_width
@@ -105,7 +106,8 @@ class StreamWorker:
 
                 # Crucial for true real-time zero latency: set internal buffer to 1 frame
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+                raw_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                self.fps = float(raw_fps) if (raw_fps and raw_fps > 0) else 30.0
                 self.total_frames = 0
                 self.current_frame_idx = 0
                 self.start_dt = datetime.datetime.now()
@@ -118,7 +120,8 @@ class StreamWorker:
 
                 self.cap = cv2.VideoCapture(video_path)
                 if self.cap.isOpened():
-                    self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+                    raw_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                    self.fps = float(raw_fps) if (raw_fps and raw_fps > 0) else 30.0
                     self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
                     self.current_frame_idx = 0
                     self.start_dt = datetime.datetime.now()
@@ -220,9 +223,14 @@ class StreamWorker:
                         self.current_frame_idx = 0
                         success, frame = self.cap.read()
                         if not success:
-                            self._is_running.clear()
-                            time.sleep(0.05)
-                            continue
+                            # Re-initialize capture from file to prevent MOV freeze
+                            self.cap.release()
+                            self.cap = cv2.VideoCapture(self.video_path)
+                            self.current_frame_idx = 0
+                            success, frame = self.cap.read()
+                            if not success:
+                                time.sleep(0.05)
+                                continue
 
                 self.current_frame_idx += 1
                 curr_idx = self.current_frame_idx
@@ -259,7 +267,6 @@ class StreamWorker:
                 new_events = telemetry.get("new_events")
                 if new_events:
                     try:
-                        from src.database.db_manager import db_manager
                         db_manager.log_events_batch(new_events, session_id=os.path.basename(str(self.video_path or "live")))
                     except Exception as db_err:
                         print(f"⚠️ DB log_events error: {db_err}")
@@ -268,7 +275,6 @@ class StreamWorker:
                 new_incidents = telemetry.get("new_incidents")
                 if new_incidents:
                     try:
-                        from src.database.db_manager import db_manager
                         db_manager.log_incidents_batch(new_incidents, session_id=os.path.basename(str(self.video_path or "live")))
                     except Exception as db_err:
                         print(f"⚠️ DB log_incidents error: {db_err}")
@@ -276,7 +282,6 @@ class StreamWorker:
                 # Periodic density snapshot (every ~5 seconds = 150 frames)
                 if curr_idx % 150 == 0:
                     try:
-                        from src.database.db_manager import db_manager
                         db_manager.log_snapshot(
                             active_vehicles=telemetry.get("active_vehicles", 0),
                             density_score=telemetry.get("density_score", 0.0),
@@ -323,12 +328,20 @@ class StreamWorker:
                 except queue.Full:
                     pass
 
-            # Frame rate throttle
+            # Frame rate throttle & Real-time pacing
             if not self.is_live:
                 elapsed = time.perf_counter() - loop_start
                 sleep_time = frame_interval - elapsed
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+                elif self.cap is not None and self.cap.isOpened():
+                    # Fast frame skip using cap.grab() (takes <15ms)
+                    # NEVER call cap.set(POS_FRAMES) which blocks 1+ seconds on MOV files
+                    frames_behind = int(elapsed * self.fps)
+                    skip_count = min(frames_behind, 2)
+                    for _ in range(skip_count):
+                        self.cap.grab()
+                        self.current_frame_idx += 1
             else:
                 # Live cameras are paced by camera hardware -> yield tiny slice
                 time.sleep(0.001)

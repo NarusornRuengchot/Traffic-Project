@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -46,11 +47,16 @@ async def websocket_stream_endpoint(websocket: WebSocket):
 
     sender_task = asyncio.create_task(frame_sender_loop())
 
-    # Send initial status on connection
+    from src.utils.file_helper import list_available_videos
+    # Push initial status and full resources directly over WebSocket
+    # Eliminates the need for frontend to spam HTTP GET /api/models and /api/videos
     await websocket.send_json({
-        "type": "model_status",
-        "status": "ready",
-        "model": worker.engine.model_name
+        "type": "init_resources",
+        "models": TrafficPipeline.get_available_models(),
+        "videos": list_available_videos(upload_dir=settings.UPLOAD_DIR, project_dir=settings.BASE_DIR),
+        "devices": TrafficPipeline.get_available_devices(),
+        "current_model": worker.engine.model_name,
+        "default_model": settings.DEFAULT_MODEL
     })
 
     try:
@@ -59,7 +65,43 @@ async def websocket_stream_endpoint(websocket: WebSocket):
             data = json.loads(raw_msg)
             cmd = data.get("command")
 
-            if cmd == "start":
+            if cmd == "ping":
+                await websocket.send_json({"type": "pong", "time": time.time()})
+
+            elif cmd == "get_resources":
+                await websocket.send_json({
+                    "type": "init_resources",
+                    "models": TrafficPipeline.get_available_models(),
+                    "videos": list_available_videos(upload_dir=settings.UPLOAD_DIR, project_dir=settings.BASE_DIR),
+                    "devices": TrafficPipeline.get_available_devices(),
+                    "current_model": worker.engine.model_name,
+                    "default_model": settings.DEFAULT_MODEL
+                })
+
+            elif cmd == "switch_model":
+                new_model = data.get("model_name")
+                if new_model:
+                    await websocket.send_json({
+                        "type": "model_status",
+                        "status": "loading",
+                        "model": new_model
+                    })
+                    try:
+                        worker.engine.load_model(new_model)
+                        await websocket.send_json({
+                            "type": "model_status",
+                            "status": "ready",
+                            "model": worker.engine.model_name
+                        })
+                    except Exception as e:
+                        await websocket.send_json({
+                            "type": "model_status",
+                            "status": "error",
+                            "model": new_model,
+                            "error": str(e)
+                        })
+
+            elif cmd == "start":
                 worker.update_config(data)
                 vid_path = data.get("video_path", "KUSRC_Traffic.mov")
                 resolved_vid = app_state.resolve_video_path(vid_path)

@@ -21,8 +21,8 @@ export default function App() {
   // Calibration and Stream Settings
   const [config, setConfig] = useState({
     video_path: 'IMG_1357.MOV',
-    model_name: 'yolo11n.pt',
-    conf_threshold: 0.25,
+    model_name: 'yolo26n.pt',
+    conf_threshold: 0.18,
 
     line_y_ratio: 0.50,
     mid_x_ratio: 0.45,
@@ -52,6 +52,8 @@ export default function App() {
     resetStream,
     updateConfig,
     updateConfigDebounced,
+    switchModel,
+    resources,
     requestPreview,
     requestPreviewDebounced
   } = useTrafficWebSocket();
@@ -72,13 +74,18 @@ export default function App() {
     const updated = { ...config, [key]: value };
     setConfig(updated);
 
-    if (isPlaying) {
+    if (key === 'model_name') {
+      // Direct WebSocket model switch (instant in-memory cache hit, zero HTTP overhead)
+      if (isConnected) {
+        switchModel(value);
+      }
+    } else if (isPlaying) {
       // Debounce parameter updates over WebSocket during playback (prevents slider event flooding)
-      updateConfigDebounced(updated, 100);
+      updateConfigDebounced(updated, 150);
     } else if (showCalibration) {
       if (isConnected) {
         // Fast, zero-lag calibration preview directly over WebSocket (prevents HTTP API spam)
-        requestPreviewDebounced(updated, 80);
+        requestPreviewDebounced(updated, 120);
       } else {
         // Fallback to REST with AbortController to cancel previous in-flight requests
         fetchCalibrationPreviewREST(updated);
@@ -169,6 +176,8 @@ export default function App() {
                 testCctv={testCctv}
                 cctvTestResult={cctvTestResult}
                 setCctvTestResult={setCctvTestResult}
+                wsResources={resources}
+                onSwitchModel={switchModel}
               />
             </div>
 

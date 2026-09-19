@@ -16,14 +16,22 @@ _MODEL_CACHE: Dict[str, Tuple[YOLO, Dict[str, int], Dict[int, str]]] = {}
 class VehicleDetector:
     def __init__(
         self,
-        model_name: str = "best.pt",
-        conf_threshold: float = 0.25,
-        img_size: int = 640,
+        model_name: str = "yolo26n.pt",
+        conf_threshold: float = 0.18,
+        img_size: int = 480,
         device: str = "cpu"
     ):
         self.conf_threshold: float = conf_threshold
         self.img_size: int = img_size
-        self.device: str = self._auto_select_device(device)
+        if torch.cuda.is_available():
+            self.device: str = self._auto_select_device(device)
+        else:
+            self.device: str = "cpu"
+            try:
+                threads = min(4, os.cpu_count() or 4)
+                torch.set_num_threads(threads)
+            except Exception:
+                pass
         self.model_name: str = ""
         self.model: Optional[YOLO] = None
         self.class_map: Dict[str, int] = {}
@@ -32,6 +40,7 @@ class VehicleDetector:
         self.target_class_ids: List[int] = []
 
         self.load_model(model_name)
+        self.warmup(self.img_size)
 
     @staticmethod
     def _auto_select_device(preferred: str = "cpu") -> str:

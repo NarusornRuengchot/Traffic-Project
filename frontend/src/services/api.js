@@ -1,19 +1,56 @@
 const API_BASE = window.location.origin.includes(':5173') 
-  ? 'http://localhost:8000' 
+  ? 'http://127.0.0.1:8000' 
   : window.location.origin;
 
+// Cache & in-flight deduplication to eliminate repetitive HTTP API spam
+let _videosCache = null;
+let _videosInFlight = null;
+let _modelsCache = null;
+let _modelsInFlight = null;
+
 export const api = {
-  async getVideos() {
-    const res = await fetch(`${API_BASE}/api/videos`);
-    return await res.json();
+  async getVideos(forceRefresh = false) {
+    if (!forceRefresh && _videosCache) return _videosCache;
+    if (_videosInFlight) return _videosInFlight;
+
+    _videosInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/videos`);
+        const data = await res.json();
+        _videosCache = data;
+        return data;
+      } catch (err) {
+        _videosCache = null;
+        throw err;
+      } finally {
+        _videosInFlight = null;
+      }
+    })();
+    return _videosInFlight;
   },
 
-  async getModels() {
-    const res = await fetch(`${API_BASE}/api/models`);
-    return await res.json();
+  async getModels(forceRefresh = false) {
+    if (!forceRefresh && _modelsCache) return _modelsCache;
+    if (_modelsInFlight) return _modelsInFlight;
+
+    _modelsInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/models`);
+        const data = await res.json();
+        _modelsCache = data;
+        return data;
+      } catch (err) {
+        _modelsCache = null;
+        throw err;
+      } finally {
+        _modelsInFlight = null;
+      }
+    })();
+    return _modelsInFlight;
   },
 
   async uploadVideo(file, onProgress) {
+    _videosCache = null; // Invalidate cache so newly uploaded video is reflected immediately
     const formData = new FormData();
     formData.append('file', file);
 

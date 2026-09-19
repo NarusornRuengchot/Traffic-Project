@@ -14,6 +14,7 @@ class Settings:
     STATIC_DIR: str = os.path.join(BASE_DIR, "static")
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
     DATA_DIR: str = os.path.join(BASE_DIR, "data")
+    MODELS_DIR: str = os.path.join(BASE_DIR, "models")
     
     # Server network settings
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -21,11 +22,11 @@ class Settings:
     CORS_ORIGINS: List[str] = ["*"]
     
     # Video & Stream defaults
-    DEFAULT_MODEL: str = "best.pt" if os.path.exists(os.path.join(BASE_DIR, "best.pt")) else "yolov11n.pt"
-    DEFAULT_CONF_THRESHOLD: float = 0.25
+    DEFAULT_MODEL: str = "yolo26n.pt"
+    DEFAULT_CONF_THRESHOLD: float = 0.18
     DEFAULT_INFERENCE_SIZE: int = 480
-    DEFAULT_STREAM_WIDTH: int = 960
-    DEFAULT_JPEG_QUALITY: int = 65
+    DEFAULT_STREAM_WIDTH: int = 768
+    DEFAULT_JPEG_QUALITY: int = 55
     
     # Camera / CCTV timeouts (milliseconds)
     CCTV_TIMEOUT_MS: int = 4000

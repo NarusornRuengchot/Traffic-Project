@@ -25,6 +25,11 @@ export function useTrafficWebSocket() {
     new_events: []
   });
 
+  const [resources, setResources] = useState({
+    models: [],
+    videos: [],
+    devices: ['cpu']
+  });
   const [eventLogs, setEventLogs] = useState([]);
   const [fps, setFps] = useState(0);
   const [streamError, setStreamError] = useState(null);
@@ -36,10 +41,11 @@ export function useTrafficWebSocket() {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.origin.includes(':5173') ? 'localhost:8000' : window.location.host;
+    const host = window.location.origin.includes(':5173') ? '127.0.0.1:8000' : window.location.host;
     const wsUrl = `${protocol}//${host}/ws/stream`;
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    // Strictly prevent duplicate WebSocket connections during React StrictMode mount
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
@@ -62,7 +68,17 @@ export function useTrafficWebSocket() {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'frame') {
+        if (msg.type === 'init_resources') {
+          // Zero HTTP API calls needed: resources delivered directly through WebSocket
+          setResources({
+            models: msg.models || [],
+            videos: msg.videos || [],
+            devices: msg.devices || ['cpu']
+          });
+          if (msg.current_model) {
+            setModelStatus({ status: 'ready', model: msg.current_model });
+          }
+        } else if (msg.type === 'frame') {
           if (msg.image) {
             setCurrentFrame(`data:image/jpeg;base64,${msg.image}`);
           }
@@ -112,6 +128,7 @@ export function useTrafficWebSocket() {
       if (previewDebounceTimerRef.current) clearTimeout(previewDebounceTimerRef.current);
       if (wsRef.current) {
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [connect]);
@@ -179,6 +196,15 @@ export function useTrafficWebSocket() {
     setStreamError(null);
   }, []);
 
+  const switchModel = useCallback((modelName) => {
+    setModelStatus({ status: 'loading', model: modelName });
+    sendCommand('switch_model', { model_name: modelName });
+  }, [sendCommand]);
+
+  const getResources = useCallback(() => {
+    sendCommand('get_resources');
+  }, [sendCommand]);
+
   return {
     isConnected,
     isPlaying,
@@ -187,6 +213,7 @@ export function useTrafficWebSocket() {
     setCalibrationPreview,
     modelStatus,
     telemetry,
+    resources,
     eventLogs,
     fps,
     streamError,
@@ -200,6 +227,8 @@ export function useTrafficWebSocket() {
     resetStream,
     updateConfig,
     updateConfigDebounced,
+    switchModel,
+    getResources,
     requestPreview,
     requestPreviewDebounced,
     reconnect: connect
