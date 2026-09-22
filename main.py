@@ -1,50 +1,55 @@
 import cv2
 import os
+import sys
+import argparse
 import datetime
 from ultralytics import YOLO
+from src.utils.file_helper import resolve_model_path, resolve_video_source
 
-# ฟังก์ชันตรวจสอบชื่อไฟล์โมเดลเพื่อป้องกันข้อผิดพลาดกรณีพิมพ์ชื่อไฟล์สลับไปมาระหว่าง yolo11 และ yolov11
-def resolve_model_path(model_path):
-    if os.path.exists(model_path):
-        return model_path
-    
-    # กรณี YOLOv11 (สลับระหว่างมี v และไม่มี v เช่น yolov11s.pt <-> yolo11s.pt)
-    if "yolov11" in model_path:
-        alt_path = model_path.replace("yolov11", "yolo11")
-        if os.path.exists(alt_path):
-            return alt_path
-    elif "yolo11" in model_path:
-        alt_path = model_path.replace("yolo11", "yolov11")
-        if os.path.exists(alt_path):
-            return alt_path
-            
-    # กรณี YOLOv8 (สลับระหว่างมี v และไม่มี v เช่น yolov8n.pt <-> yolo8n.pt)
-    if "yolov8" in model_path:
-        alt_path = model_path.replace("yolov8", "yolo8")
-        if os.path.exists(alt_path):
-            return alt_path
-    elif "yolo8" in model_path:
-        alt_path = model_path.replace("yolo8", "yolov8")
-        if os.path.exists(alt_path):
-            return alt_path
-            
-    return model_path
+# CLI Arguments support
+parser = argparse.ArgumentParser(description="KU SRC Smart Traffic Analytics - Desktop Video Processor")
+parser.add_argument("--model", type=str, default="best.pt", help="Model name (e.g., best.pt, yolo26s.pt, yolo26n.pt)")
+parser.add_argument("--video", type=str, default="IMG_1357.MOV", help="Video path or webcam (e.g., uploads/IMG_1357.MOV, webcam:0)")
+parser.add_argument("--size", type=int, default=640, help="Inference image resolution (default: 640)")
+parser.add_argument("--conf", type=float, default=0.18, help="Confidence threshold (default: 0.18)")
 
-# เลือกรุ่นของโมเดลที่ต้องการทดสอบ (YOLO Model Configuration)
-# สามารถเลือกใช้ได้ทั้ง YOLOv11 (แนะนำ) หรือเปลี่ยนเป็น YOLOv8 ได้ตามต้องการ
-# ตัวอย่างโมเดล YOLOv11 ที่มีในโฟลเดอร์: "yolov11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt"
-# ตัวอย่างโมเดล YOLOv8 ที่มีในโฟลเดอร์: "yolov8n.pt"
-MODEL_PATH = "best.pt" if os.path.exists("best.pt") else resolve_model_path("yolov11n.pt")  # ใช้โมเดลที่ fine-tune แล้ว ถ้าไม่มีจะ fallback ไป yolov11n.pt
-IMG_SIZE = 1280             # ขนาดความละเอียดในตรวจจับ (640 = มาตรฐาน/เร็ว, 1280 = แม่นยำวัตถุขนาดเล็กแต่ช้าลง)
+# Parse args (ignore unrecognized for interactive terminal flexibility)
+args, _ = parser.parse_known_args()
+
+MODEL_NAME = args.model
+MODEL_PATH = resolve_model_path(MODEL_NAME, search_dirs=["models", "."])
+IMG_SIZE = args.size
+CONF_THRESH = args.conf
+
+print(f"🚀 Initializing Smart Traffic AI Engine...")
+print(f"   Model: {MODEL_PATH} ({'YOLO26 Next-Gen' if '26' in MODEL_PATH else 'Custom Traffic Model'})")
+print(f"   Resolution: {IMG_SIZE}px | Confidence: {int(CONF_THRESH * 100)}%")
 
 model = YOLO(MODEL_PATH)
 
 
-# 2. นำเข้าไฟล์วิดีโอ 
-cap = cv2.VideoCapture("KUSRC_Traffic.mov") 
+# 2. นำเข้าไฟล์วิดีโอ (ค้นหา KUSRC_Traffic.mov หรือไฟล์ในโฟลเดอร์ uploads อัตโนมัติ)
+video_candidates = [
+    "KUSRC_Traffic.mov",
+    os.path.join("uploads", "IMG_1357.MOV"),
+    "IMG_1357.MOV"
+]
+if os.path.exists("uploads"):
+    for f in os.listdir("uploads"):
+        if f.lower().endswith(('.mov', '.mp4', '.avi', '.mkv')):
+            video_candidates.append(os.path.join("uploads", f))
+
+video_path = next((p for p in video_candidates if os.path.exists(p)), None)
+
+if not video_path:
+    print("เกิดข้อผิดพลาด: ระบบไม่สามารถค้นหาไฟล์วิดีโอได้ (กรุณาวางไฟล์วิดีโอ .mov/.mp4 ไว้ในโฟลเดอร์โปรเจกต์ หรือในโฟลเดอร์ uploads)")
+    exit()
+
+print(f"กำลังเปิดไฟล์วิดีโอ: {video_path}")
+cap = cv2.VideoCapture(video_path)
 
 if not cap.isOpened():
-    print("เกิดข้อผิดพลาด: ระบบไม่สามารถค้นหาหรือเปิดไฟล์วิดีโอได้")
+    print(f"เกิดข้อผิดพลาด: ระบบไม่สามารถเปิดไฟล์วิดีโอ '{video_path}' ได้")
     exit()
 
 # ดึงค่าความกว้างและความสูงของวิดีโออัตโนมัติ
@@ -115,8 +120,9 @@ while cap.isOpened():
 
     frame_idx += 1
     # 3. ตรวจจับและติดตามยานพาหนะ
-   # เปลี่ยนจาก device=0 เป็น device='cpu' เพื่อไม่ให้โปรแกรม Error
-    results = model.track(frame, imgsz=IMG_SIZE, classes=[2, 3, 5, 7], persist=True, tracker="custom_tracker.yaml", device='cpu', conf=0.15)
+    # ถ้าใช้ fine-tuned model ให้ตรวจจับทุกคลาสของโมเดล ถ้าเป็น YOLO26/COCO ให้จับ car, motorcycle, bus, truck (2, 3, 5, 7)
+    target_classes = None if ("best" in MODEL_PATH or "custom" in MODEL_PATH) else [2, 3, 5, 7]
+    results = model.track(frame, imgsz=IMG_SIZE, classes=target_classes, persist=True, tracker="custom_tracker.yaml", device='cpu', conf=CONF_THRESH)
 
     annotated_frame = results[0].plot()
 
