@@ -1,0 +1,6 @@
+path: C:\Users\BOAT\OneDrive\à´Ê¡ì·çÍ»\seminar\dataset_motorcycles
+train: images
+val: images
+
+nc: 4
+names: ['bus', 'car', 'motorbike', 'truck']

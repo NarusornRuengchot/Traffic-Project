@@ -1,0 +1,251 @@
+import React, { useState, useEffect } from 'react';
+import { Header } from './components/Header';
+import { MetricCards } from './components/MetricCards';
+import { VideoPlayer } from './components/VideoPlayer';
+import { ControlPanel } from './components/ControlPanel';
+import { VehicleBreakdown } from './components/VehicleBreakdown';
+import { AnalyticsCharts } from './components/AnalyticsCharts';
+import { EventLogTable } from './components/EventLogTable';
+import { HistoryReport } from './components/HistoryReport';
+import { IncidentAlerts } from './components/IncidentAlerts';
+import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
+import { api } from './services/api';
+
+export default function App() {
+  const [theme, setTheme] = useState('dark');
+  const [activeTab, setActiveTab] = useState('live');
+  const [showCalibration, setShowCalibration] = useState(false);
+  const [restCalibrationPreview, setRestCalibrationPreview] = useState(null);
+  const abortControllerRef = React.useRef(null);
+
+  // Calibration and Stream Settings
+  const [config, setConfig] = useState({
+    video_path: 'IMG_1357.MOV',
+    model_name: 'yolo26n.pt',
+    conf_threshold: 0.18,
+
+    line_y_ratio: 0.50,
+    mid_x_ratio: 0.45,
+    swap_directions: false,
+    speed_limit_kmh: 50,
+    pixels_per_meter: 22,
+    target_classes: ['Car', 'Motorcycle', 'Bus', 'Truck']
+  });
+
+  const {
+    isConnected,
+    isPlaying,
+    currentFrame,
+    calibrationPreview: wsCalibrationPreview,
+    modelStatus,
+    telemetry,
+    eventLogs,
+    fps,
+    streamError,
+    cctvTestResult,
+    setCctvTestResult,
+    clearStreamError,
+    testCctv,
+    startStream,
+    pauseStream,
+    resumeStream,
+    resetStream,
+    updateConfig,
+    updateConfigDebounced,
+    switchModel,
+    resources,
+    requestPreview,
+    requestPreviewDebounced
+  } = useTrafficWebSocket();
+
+  // Active calibration preview prioritizes real-time WebSocket preview
+  const activeCalibrationPreview = wsCalibrationPreview || restCalibrationPreview;
+
+  // Apply Theme to DOM
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const handleConfigChange = (key, value) => {
+    const updated = { ...config, [key]: value };
+    setConfig(updated);
+
+    if (key === 'model_name') {
+      // Direct WebSocket model switch (instant in-memory cache hit, zero HTTP overhead)
+      if (isConnected) {
+        switchModel(value);
+      }
+    } else if (isPlaying) {
+      // Debounce parameter updates over WebSocket during playback (prevents slider event flooding)
+      updateConfigDebounced(updated, 150);
+    } else if (showCalibration) {
+      if (isConnected) {
+        // Fast, zero-lag calibration preview directly over WebSocket (prevents HTTP API spam)
+        requestPreviewDebounced(updated, 120);
+      } else {
+        // Fallback to REST with AbortController to cancel previous in-flight requests
+        fetchCalibrationPreviewREST(updated);
+      }
+    }
+  };
+
+  const fetchCalibrationPreviewREST = async (currentCfg = config) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const res = await api.getCalibrationPreview(
+        currentCfg.video_path,
+        currentCfg.line_y_ratio,
+        currentCfg.mid_x_ratio,
+        currentCfg.swap_directions,
+        abortControllerRef.current.signal
+      );
+      if (res && res.preview) {
+        setRestCalibrationPreview(`data:image/jpeg;base64,${res.preview}`);
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Failed to get calibration preview', err);
+      }
+    }
+  };
+
+  const handleToggleCalibration = () => {
+    const nextState = !showCalibration;
+    setShowCalibration(nextState);
+    if (nextState) {
+      if (isConnected) {
+        requestPreview(config);
+      } else {
+        fetchCalibrationPreviewREST(config);
+      }
+    }
+  };
+
+  const handleStartStream = () => {
+    setShowCalibration(false);
+    startStream(config);
+  };
+
+  const isLive = Boolean(
+    telemetry?.is_live ||
+    config.video_path === 'webcam:0' ||
+    config.video_path?.startsWith('rtsp://') ||
+    config.video_path?.startsWith('http://')
+  );
+
+  return (
+    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px' }}>
+      {/* Top Header with Tab Switcher */}
+      <Header
+        isConnected={isConnected}
+        isPlaying={isPlaying}
+        isLive={isLive}
+        fps={fps}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+      />
+
+      {/* Conditional Rendering: Live Monitoring vs Historical Reports */}
+      {activeTab === 'reports' ? (
+        <HistoryReport />
+      ) : (
+        <>
+          {/* KPI Metric Summary Cards */}
+          <MetricCards telemetry={telemetry} />
+
+          {/* Main Grid: Left Control Panel, Center Video, Right Analytics */}
+          <div className="dashboard-grid">
+            {/* Left Column: Control Panel & Settings */}
+            <div>
+              <ControlPanel
+                config={config}
+                onChangeConfig={handleConfigChange}
+                onToggleCalibrationPreview={handleToggleCalibration}
+                showCalibration={showCalibration}
+                modelStatus={modelStatus}
+                testCctv={testCctv}
+                cctvTestResult={cctvTestResult}
+                setCctvTestResult={setCctvTestResult}
+                wsResources={resources}
+                onSwitchModel={switchModel}
+              />
+            </div>
+
+            {/* Center Column: Video Stream & Event Logs */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Connection Error Banner */}
+              {streamError && (
+                <div style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  borderRadius: '10px',
+                  padding: '14px 18px',
+                  color: '#EF4444',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.15)',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '700', fontSize: '0.9rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>⚠️ ไม่สามารถเปิดสัญญาณกล้อง CCTV / แหล่งภาพได้</span>
+                    </div>
+                    <div style={{ lineHeight: '1.5', opacity: 0.95 }}>{streamError}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearStreamError}
+                    style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '1.2rem', cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+                    title="ปิดข้อความแจ้งเตือน"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Real-time Incident Alerts Drawer */}
+              <IncidentAlerts incidents={telemetry?.active_incidents || []} />
+
+              <VideoPlayer
+                currentFrame={currentFrame}
+                isPlaying={isPlaying}
+                isLive={isLive}
+                onStart={handleStartStream}
+                onPause={pauseStream}
+                onResume={resumeStream}
+                onReset={resetStream}
+                calibrationPreview={activeCalibrationPreview}
+                showCalibration={showCalibration}
+              />
+
+              <EventLogTable eventLogs={eventLogs} />
+            </div>
+
+            {/* Right Column: Breakdown & Real-time Charts */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <VehicleBreakdown
+                classCounts={telemetry.class_counts || {}}
+                totalCount={telemetry.total_count || 0}
+              />
+
+              <AnalyticsCharts telemetry={telemetry} isPlaying={isPlaying} />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
