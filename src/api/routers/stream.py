@@ -14,6 +14,7 @@ from src.services.stream_worker import StreamWorker
 router = APIRouter(tags=["WebSocket Stream"])
 
 @router.websocket("/ws/stream")
+@router.websocket("/ws/traffic")
 async def websocket_stream_endpoint(websocket: WebSocket):
     """
     Decoupled Real-Time WebSocket Streaming Endpoint.

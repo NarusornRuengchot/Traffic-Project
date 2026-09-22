@@ -42,7 +42,10 @@ async def upload_video(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     return {
+        "status": "success",
         "success": True,
+        "filename": clean_name,
+        "path": dest_path,
         "video": {
             "id": clean_name,
             "name": f"📁 Uploaded: {clean_name}",
