@@ -24,10 +24,17 @@
                 </div>
             </div>
             <div class="navbar-actions">
+                <div class="db-status" id="dbStatusBadge" title="MySQL / phpMyAdmin Connection Status">
+                    <span class="status-dot"></span>
+                    <span class="status-text" id="dbStatusText">Checking DB...</span>
+                </div>
                 <div class="ws-status" id="wsStatus">
                     <span class="status-dot"></span>
                     <span class="status-text">Connecting WebSocket...</span>
                 </div>
+                <button class="btn btn-history-nav" id="historyModalBtn" title="View MySQL / phpMyAdmin Past Records">
+                    🗄️ History &amp; DB Records
+                </button>
                 <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Dark/Light Mode">🌙</button>
             </div>
         </header>
@@ -253,6 +260,79 @@
                     </div>
                 </section>
             </main>
+        </div>
+    </div>
+
+    <!-- History & Database Records Modal -->
+    <div class="modal-backdrop" id="historyModal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h2 class="modal-title">🗄️ MySQL Database Records (phpMyAdmin)</h2>
+                    <p class="modal-subtitle" id="dbInfoSubtitle">Database: ku_src_traffic | Host: localhost:3306</p>
+                </div>
+                <button class="modal-close-btn" id="closeHistoryBtn">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Search & Actions Bar -->
+                <div class="modal-actions-bar">
+                    <input type="text" id="historySearchInput" class="form-control search-input" placeholder="🔍 ค้นหาชื่อวิดีโอ หรือ ระดับการจราจร...">
+                    <button id="refreshHistoryBtn" class="btn btn-secondary btn-sm">🔄 รีเฟรชข้อมูล</button>
+                </div>
+
+                <!-- Sessions Table -->
+                <div class="table-responsive modal-table-wrapper">
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th>#ID</th>
+                                <th>ชื่อวิดีโอ (Video)</th>
+                                <th>เวลาที่ถ่าย (Recorded Time)</th>
+                                <th>ยอดรวม (Total)</th>
+                                <th>ขาเข้า (In)</th>
+                                <th>ขาออก (Out)</th>
+                                <th>ระดับการจราจร (Max Congestion)</th>
+                                <th>บันทึกเมื่อ (Saved At)</th>
+                                <th>การกระทำ (Actions)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr>
+                                <td colspan="9" style="text-align:center; padding: 2rem;">กำลังโหลดข้อมูลจาก MySQL...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Session Detail View (Accordion/Expansion) -->
+                <div id="sessionDetailContainer" class="session-detail-card" style="display: none;">
+                    <div class="detail-header">
+                        <h3 id="detailTitle">📊 รายละเอียดการวิเคราะห์ Session #1</h3>
+                        <button id="closeDetailBtn" class="btn btn-sm btn-outline">ปิดรายละเอียด</button>
+                    </div>
+                    <div class="detail-meta-grid" id="detailMetaGrid"></div>
+                    <div class="table-responsive mt-2">
+                        <table class="summary-table">
+                            <thead>
+                                <tr>
+                                    <th>ช่วงเวลา (Time Window)</th>
+                                    <th>ขาเข้า (In)</th>
+                                    <th>ขาออก (Out)</th>
+                                    <th>รวม (Total)</th>
+                                    <th>Stall Ratio</th>
+                                    <th>ระดับการจราจร (Congestion)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailIntervalsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="db-hint">💡 สามารถเปิดดูตาราง <code>analysis_sessions</code>, <code>traffic_intervals</code> และ <code>traffic_events</code> ใน phpMyAdmin ได้โดยตรง</span>
+                <button class="btn btn-secondary" id="closeHistoryFooterBtn">ปิดหน้าต่าง</button>
+            </div>
         </div>
     </div>
 
