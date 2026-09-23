@@ -33,6 +33,7 @@ class VehicleDetector:
             except Exception:
                 pass
         self.model_name: str = ""
+        self.model_path: str = ""
         self.model: Optional[YOLO] = None
         self.class_map: Dict[str, int] = {}
         self.id_to_name: Dict[int, str] = {}
@@ -66,6 +67,7 @@ class VehicleDetector:
             else:
                 resolved = model_name
 
+        self.model_path = resolved
         self.model_name = os.path.basename(resolved)
 
         # 1. Fast Cache Hit: Instant model switch (<1ms)

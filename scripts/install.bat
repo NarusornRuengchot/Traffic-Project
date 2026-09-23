@@ -33,13 +33,19 @@ if %errorlevel% EQU 0 (
 )
 
 :: Create virtual environment if it doesn't exist
+set VENV_DIR=.venv
+if exist .venv (
+    echo Virtual environment ^(.venv^) already exists.
+    goto venv_done
+)
 if exist v (
+    set VENV_DIR=v
     echo Virtual environment ^(v^) already exists.
     goto venv_done
 )
 
-echo Creating virtual environment ^(v^)...
-python -m venv v
+echo Creating virtual environment ^(.venv^)...
+python -m venv .venv
 if errorlevel 1 (
     echo [ERROR] Failed to create virtual environment.
     pause
@@ -51,12 +57,12 @@ echo Virtual environment created successfully.
 
 echo.
 echo Upgrading pip inside virtual environment...
-v\Scripts\python.exe -m pip install --upgrade pip
+%VENV_DIR%\Scripts\python.exe -m pip install --upgrade pip
 
 echo.
 echo Installing dependencies from backend\requirements.txt...
-echo This might take a few minutes (downloading torch, ultralytics, streamlit)...
-v\Scripts\python.exe -m pip install -r backend\requirements.txt
+echo This might take a few minutes (downloading torch, ultralytics, fastapi)...
+%VENV_DIR%\Scripts\python.exe -m pip install -r backend\requirements.txt
 
 if %errorlevel% neq 0 (
     echo.
@@ -78,13 +84,11 @@ echo ===================================================
 echo [SUCCESS] Setup completed successfully!
 echo ===================================================
 echo.
-echo To run the React dashboard (FastAPI):
-echo   cd backend ^&^& ..\v\Scripts\python.exe server.py
+echo To run the Smart Traffic Web Dashboard:
+echo   scripts\run_dashboard.bat
+echo   OR: cd backend ^&^& ..\%VENV_DIR%\Scripts\python.exe server.py
 echo.
-echo To run the legacy Streamlit dashboard:
-echo   cd backend ^&^& ..\v\Scripts\python.exe -m streamlit run legacy\app.py
-echo.
-echo To run the legacy OpenCV Desktop app:
-echo   cd backend ^&^& ..\v\Scripts\python.exe -m legacy.main
+echo To run the OpenCV Desktop processor:
+echo   cd backend ^&^& ..\%VENV_DIR%\Scripts\python.exe -m legacy.main
 echo.
 pause

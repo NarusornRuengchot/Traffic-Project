@@ -4,6 +4,8 @@ import datetime
 import threading
 from typing import List, Dict, Any, Optional, Tuple
 
+from src.utils.security import hash_password, verify_password
+
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 DEFAULT_DB_PATH = os.path.join(DB_DIR, "traffic_analytics.db")
 
@@ -17,6 +19,12 @@ class DatabaseManager:
 
     def __new__(cls, db_path: str = DEFAULT_DB_PATH):
         with cls._lock:
+            if db_path != DEFAULT_DB_PATH:
+                # Dedicated isolated instance for custom paths (e.g. unit testing)
+                inst = super(DatabaseManager, cls).__new__(cls)
+                inst._init_db(db_path)
+                return inst
+
             if cls._instance is None:
                 cls._instance = super(DatabaseManager, cls).__new__(cls)
                 cls._instance._init_db(db_path)
@@ -97,13 +105,109 @@ class DatabaseManager:
                 );
             """)
 
-            # Indices for lightning-fast academic reports and peak-hour queries
+            # 4. Users and Authentication table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    full_name TEXT,
+                    role TEXT DEFAULT 'operator', -- admin, business_owner, operator
+                    business_id INTEGER,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # 5. Business entities and organizations table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS businesses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    business_type TEXT DEFAULT 'retail', -- retail, gas_station, logistics, smart_parking, campus
+                    branch_code TEXT,
+                    address TEXT,
+                    contact_email TEXT,
+                    contact_phone TEXT,
+                    opening_hour INTEGER DEFAULT 8,
+                    closing_hour INTEGER DEFAULT 22,
+                    target_hourly_traffic INTEGER DEFAULT 100,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # 6. Business CCTV cameras table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS business_cameras (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    business_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    stream_url TEXT NOT NULL,
+                    camera_type TEXT DEFAULT 'entrance', -- entrance, exit, parking, lane
+                    location_note TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # 7. Business daily metrics table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS business_daily_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    business_id INTEGER NOT NULL,
+                    date TEXT NOT NULL,
+                    total_customer_vehicles INTEGER DEFAULT 0,
+                    peak_customer_hour INTEGER DEFAULT 0,
+                    peak_vehicle_count INTEGER DEFAULT 0,
+                    car_count INTEGER DEFAULT 0,
+                    motorcycle_count INTEGER DEFAULT 0,
+                    commercial_truck_count INTEGER DEFAULT 0,
+                    bus_count INTEGER DEFAULT 0,
+                    estimated_footfall INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(business_id, date)
+                );
+            """)
+
+            # Indices for lightning-fast academic reports, peak-hour, and business queries
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_date_hour ON vehicle_events(date, hour);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON vehicle_events(vehicle_type);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_direction ON vehicle_events(direction);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON traffic_snapshots(date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_date ON traffic_incidents(date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_type ON traffic_incidents(incident_type);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_business_cameras ON business_cameras(business_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_business_metrics ON business_daily_metrics(business_id, date);")
+
+            # Seed default admin user if table is empty
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM users;")
+            if cur.fetchone()[0] == 0:
+                admin_hash = hash_password("admin123")
+                cur.execute("""
+                    INSERT INTO users (username, email, password_hash, full_name, role)
+                    VALUES (?, ?, ?, ?, ?);
+                """, ("admin", "admin@kusrc.ac.th", admin_hash, "ผู้ดูแลระบบ (System Admin)", "admin"))
+
+            # Seed default business baseline if table is empty
+            cur.execute("SELECT COUNT(*) FROM businesses;")
+            if cur.fetchone()[0] == 0:
+                cur.execute("""
+                    INSERT INTO businesses (name, business_type, branch_code, address, contact_email, contact_phone, target_hourly_traffic)
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    "มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตศรีราชา",
+                    "campus",
+                    "KU-SRC-01",
+                    "199 ม.6 ถ.สุขุมวิท ต.ทุ่งสุขลา อ.ศรีราชา จ.ชลบุรี 20230",
+                    "traffic@src.ku.ac.th",
+                    "038-354580",
+                    150
+                ))
+
             conn.commit()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -581,12 +685,399 @@ class DatabaseManager:
             )
         return "\n".join(lines)
 
+    # =========================================================================
+    # USER & AUTHENTICATION METHODS
+    # =========================================================================
+    def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        full_name: str = "",
+        role: str = "operator",
+        business_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Creates a new user with securely hashed PBKDF2 password."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        pwd_hash = hash_password(password)
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, full_name, role, business_id)
+            VALUES (?, ?, ?, ?, ?, ?);
+        """, (username.strip(), email.strip().lower(), pwd_hash, full_name.strip(), role, business_id))
+        conn.commit()
+        uid = cursor.lastrowid
+        return {
+            "id": uid,
+            "username": username.strip(),
+            "email": email.strip().lower(),
+            "full_name": full_name.strip(),
+            "role": role,
+            "business_id": business_id
+        }
+
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Fetches user by ID (excluding password hash)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.username, u.email, u.full_name, u.role, u.business_id, u.is_active, u.created_at,
+                   b.name as business_name, b.business_type
+            FROM users u
+            LEFT JOIN businesses b ON u.business_id = b.id
+            WHERE u.id = ?;
+        """, (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """Fetches user by username (includes password_hash for internal verification)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.username, u.email, u.password_hash, u.full_name, u.role, u.business_id, u.is_active,
+                   b.name as business_name, b.business_type
+            FROM users u
+            LEFT JOIN businesses b ON u.business_id = b.id
+            WHERE u.username = ?;
+        """, (username.strip(),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Fetches user by email."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.username, u.email, u.password_hash, u.full_name, u.role, u.business_id, u.is_active,
+                   b.name as business_name, b.business_type
+            FROM users u
+            LEFT JOIN businesses b ON u.business_id = b.id
+            WHERE u.email = ?;
+        """, (email.strip().lower(),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def authenticate_user(self, username_or_email: str, plain_password: str) -> Optional[Dict[str, Any]]:
+        """Verifies credentials, returns user profile dictionary if valid, None otherwise."""
+        user = self.get_user_by_username(username_or_email) or self.get_user_by_email(username_or_email)
+        if not user or not user.get("is_active"):
+            return None
+        if verify_password(plain_password, user["password_hash"]):
+            safe_user = dict(user)
+            safe_user.pop("password_hash", None)
+            return safe_user
+        return None
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """Lists all registered users."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.username, u.email, u.full_name, u.role, u.business_id, u.is_active, u.created_at,
+                   b.name as business_name
+            FROM users u
+            LEFT JOIN businesses b ON u.business_id = b.id
+            ORDER BY u.id ASC;
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+    # =========================================================================
+    # BUSINESS & ORGANIZATION MANAGEMENT
+    # =========================================================================
+    def create_business(
+        self,
+        name: str,
+        business_type: str = "retail",
+        branch_code: str = "",
+        address: str = "",
+        contact_email: str = "",
+        contact_phone: str = "",
+        opening_hour: int = 8,
+        closing_hour: int = 22,
+        target_hourly_traffic: int = 100
+    ) -> int:
+        """Registers a new business, branch, or commercial facility."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO businesses (name, business_type, branch_code, address, contact_email, contact_phone, opening_hour, closing_hour, target_hourly_traffic)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (name.strip(), business_type, branch_code.strip(), address.strip(), contact_email.strip(), contact_phone.strip(), opening_hour, closing_hour, target_hourly_traffic))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_businesses(self) -> List[Dict[str, Any]]:
+        """Lists all businesses with their registered camera count."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT b.*, COUNT(c.id) as cameras_count
+            FROM businesses b
+            LEFT JOIN business_cameras c ON b.id = c.business_id
+            GROUP BY b.id
+            ORDER BY b.id ASC;
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_business_by_id(self, business_id: int) -> Optional[Dict[str, Any]]:
+        """Fetches single business details by ID."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM businesses WHERE id = ?;", (business_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_business(self, business_id: int, data: Dict[str, Any]) -> bool:
+        """Updates business details."""
+        allowed_fields = [
+            "name", "business_type", "branch_code", "address",
+            "contact_email", "contact_phone", "opening_hour",
+            "closing_hour", "target_hourly_traffic"
+        ]
+        updates = []
+        vals = []
+        for k, v in data.items():
+            if k in allowed_fields:
+                updates.append(f"{k} = ?")
+                vals.append(v)
+        if not updates:
+            return False
+        vals.append(business_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE businesses SET {', '.join(updates)} WHERE id = ?;", vals)
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_business(self, business_id: int) -> bool:
+        """Deletes a business and associated camera entries."""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM business_cameras WHERE business_id = ?;", (business_id,))
+            conn.execute("DELETE FROM business_daily_metrics WHERE business_id = ?;", (business_id,))
+            conn.execute("DELETE FROM businesses WHERE id = ?;", (business_id,))
+            conn.commit()
+            return True
+
+    # =========================================================================
+    # BUSINESS CCTV CAMERAS
+    # =========================================================================
+    def create_business_camera(
+        self,
+        business_id: int,
+        name: str,
+        stream_url: str,
+        camera_type: str = "entrance",
+        location_note: str = ""
+    ) -> int:
+        """Links a CCTV or RTSP stream to a specific business branch."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO business_cameras (business_id, name, stream_url, camera_type, location_note)
+            VALUES (?, ?, ?, ?, ?);
+        """, (business_id, name.strip(), stream_url.strip(), camera_type, location_note.strip()))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_business_cameras(self, business_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Returns CCTV cameras linked to business branches."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if business_id is not None:
+            cursor.execute("""
+                SELECT c.*, b.name as business_name, b.branch_code
+                FROM business_cameras c
+                JOIN businesses b ON c.business_id = b.id
+                WHERE c.business_id = ?
+                ORDER BY c.id ASC;
+            """, (business_id,))
+        else:
+            cursor.execute("""
+                SELECT c.*, b.name as business_name, b.branch_code
+                FROM business_cameras c
+                JOIN businesses b ON c.business_id = b.id
+                ORDER BY c.id ASC;
+            """)
+        return [dict(r) for r in cursor.fetchall()]
+
+    def delete_business_camera(self, camera_id: int) -> bool:
+        """Removes a camera from business."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM business_cameras WHERE id = ?;", (camera_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # =========================================================================
+    # BUSINESS ANALYTICS & INSIGHTS
+    # =========================================================================
+    def get_business_dashboard_analytics(
+        self,
+        business_id: Optional[int] = None,
+        target_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Aggregates traffic data into actionable business intelligence:
+        - Customer volume by operating hours
+        - Estimated footfall (passengers / shoppers)
+        - Peak business arrival hour & volume
+        - Commercial logistics vs Passenger customer breakdown
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 1. Fetch business metadata
+        biz = None
+        if business_id:
+            biz = self.get_business_by_id(business_id)
+        if not biz:
+            businesses = self.get_businesses()
+            biz = businesses[0] if businesses else {
+                "id": 1, "name": "General Business", "business_type": "retail",
+                "opening_hour": 8, "closing_hour": 22, "target_hourly_traffic": 100
+            }
+
+        opening_hour = biz.get("opening_hour", 8)
+        closing_hour = biz.get("closing_hour", 22)
+        target_traffic = biz.get("target_hourly_traffic", 100)
+
+        # 2. Date filtering
+        date_clause = ""
+        params = []
+        if target_date:
+            date_clause = "WHERE date = ?"
+            params.append(target_date)
+
+        # Total vehicles and breakdown
+        cursor.execute(f"""
+            SELECT vehicle_type, COUNT(*) as count
+            FROM vehicle_events
+            {date_clause}
+            GROUP BY vehicle_type;
+        """, params)
+        class_counts = {r["vehicle_type"]: r["count"] for r in cursor.fetchall()}
+
+        car_cnt = class_counts.get("Car", 0)
+        bike_cnt = class_counts.get("Motorcycle", 0)
+        bus_cnt = class_counts.get("Bus", 0)
+        truck_cnt = class_counts.get("Truck", 0)
+        total_vehicles = car_cnt + bike_cnt + bus_cnt + truck_cnt
+
+        # Estimated Footfall Formula (People who arrived):
+        # Car = ~1.6 people, Bike = ~1.2 people, Bus = ~25 people, Truck = ~1.1 people
+        estimated_footfall = int(car_cnt * 1.6 + bike_cnt * 1.2 + bus_cnt * 25.0 + truck_cnt * 1.1)
+
+        # Commercial vs Passenger Split
+        commercial_cnt = truck_cnt + bus_cnt
+        passenger_cnt = car_cnt + bike_cnt
+        commercial_ratio = round((commercial_cnt / total_vehicles * 100.0), 1) if total_vehicles > 0 else 0.0
+        passenger_ratio = round((passenger_cnt / total_vehicles * 100.0), 1) if total_vehicles > 0 else 0.0
+
+        # Hourly Distribution (0..23)
+        cursor.execute(f"""
+            SELECT hour,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN direction = 'inbound' THEN 1 ELSE 0 END) as inbound,
+                   SUM(CASE WHEN direction = 'outbound' THEN 1 ELSE 0 END) as outbound,
+                   ROUND(AVG(speed_kmh), 1) as avg_speed
+            FROM vehicle_events
+            {date_clause}
+            GROUP BY hour
+            ORDER BY hour ASC;
+        """, params)
+        hourly_raw = {r["hour"]: dict(r) for r in cursor.fetchall()}
+
+        hourly_series = []
+        peak_hour = opening_hour
+        peak_count = 0
+        operating_hours_traffic = 0
+
+        for h in range(24):
+            item = hourly_raw.get(h, {"total": 0, "inbound": 0, "outbound": 0, "avg_speed": 0.0})
+            total_h = item["total"]
+            is_open = (opening_hour <= h <= closing_hour)
+            if is_open:
+                operating_hours_traffic += total_h
+
+            if total_h > peak_count:
+                peak_count = total_h
+                peak_hour = h
+
+            hourly_series.append({
+                "hour": h,
+                "hour_label": f"{h:02d}:00",
+                "total": total_h,
+                "inbound": item["inbound"],
+                "outbound": item["outbound"],
+                "avg_speed": item["avg_speed"] or 0.0,
+                "is_operating_hour": is_open
+            })
+
+        operating_hours_count = max(1, closing_hour - opening_hour + 1)
+        avg_hourly_traffic = round(operating_hours_traffic / operating_hours_count, 1)
+        target_achievement = round((avg_hourly_traffic / target_traffic * 100.0), 1) if target_traffic > 0 else 100.0
+
+        # Cameras count
+        cameras = self.get_business_cameras(biz.get("id"))
+
+        return {
+            "business": biz,
+            "target_date": target_date or "All-Time",
+            "kpis": {
+                "total_vehicles": total_vehicles,
+                "estimated_footfall": estimated_footfall,
+                "peak_hour": f"{peak_hour:02d}:00 - {peak_hour+1:02d}:00",
+                "peak_vehicle_count": peak_count,
+                "avg_hourly_traffic": avg_hourly_traffic,
+                "target_hourly_traffic": target_traffic,
+                "target_achievement_pct": target_achievement,
+                "operating_hours_traffic": operating_hours_traffic,
+                "commercial_ratio": commercial_ratio,
+                "passenger_ratio": passenger_ratio,
+                "cameras_count": len(cameras)
+            },
+            "vehicle_breakdown": {
+                "Car": car_cnt,
+                "Motorcycle": bike_cnt,
+                "Bus": bus_cnt,
+                "Truck": truck_cnt
+            },
+            "hourly_traffic": hourly_series,
+            "cameras": cameras
+        }
+
     def clear_all(self):
-        """Clears all events, snapshots, and incidents (useful for test resets)."""
+        """Clears all events, snapshots, incidents, and test records."""
         with self.get_connection() as conn:
             conn.execute("DELETE FROM vehicle_events;")
             conn.execute("DELETE FROM traffic_snapshots;")
             conn.execute("DELETE FROM traffic_incidents;")
+            conn.execute("DELETE FROM business_cameras;")
+            conn.execute("DELETE FROM business_daily_metrics;")
+            conn.execute("DELETE FROM businesses;")
+            conn.execute("DELETE FROM users;")
+
+            # Re-seed default admin
+            admin_hash = hash_password("admin123")
+            conn.execute("""
+                INSERT INTO users (username, email, password_hash, full_name, role)
+                VALUES (?, ?, ?, ?, ?);
+            """, ("admin", "admin@kusrc.ac.th", admin_hash, "ผู้ดูแลระบบ (System Admin)", "admin"))
+
+            # Re-seed default business baseline
+            conn.execute("""
+                INSERT INTO businesses (name, business_type, branch_code, address, contact_email, contact_phone, target_hourly_traffic)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+            """, (
+                "มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตศรีราชา",
+                "campus",
+                "KU-SRC-01",
+                "199 ม.6 ถ.สุขุมวิท ต.ทุ่งสุขลา อ.ศรีราชา จ.ชลบุรี 20230",
+                "traffic@src.ku.ac.th",
+                "038-354580",
+                150
+            ))
             conn.commit()
 
 # Global Singleton Database Manager instance

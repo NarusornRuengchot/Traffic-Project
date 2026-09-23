@@ -13,7 +13,7 @@ ROBOFLOW_API_KEY = "YOUR_API_KEY_HERE"
 WORKSPACE_ID = "YOUR_WORKSPACE"
 PROJECT_ID = "YOUR_PROJECT_NAME"
 
-DATASET_DIR = "dataset_motorcycles"
+DATASET_DIR = os.path.join("data", "dataset_motorcycles") if os.path.exists(os.path.join("data", "dataset_motorcycles")) else "dataset_motorcycles"
 
 def upload():
     if ROBOFLOW_API_KEY == "YOUR_API_KEY_HERE":

@@ -47,10 +47,10 @@ class TestWebSocketFeatures(unittest.TestCase):
         asyncio.run(websocket_stream_endpoint(dummy_ws))
 
         # Check sent messages:
-        # 1. First message should be initial model_status
+        # 1. First message should be initial init_resources
         # 2. Second message should be preview packet
         msg_types = [m.get("type") for m in dummy_ws.sent if isinstance(m, dict)]
-        self.assertIn("model_status", msg_types)
+        self.assertIn("init_resources", msg_types)
         self.assertIn("preview", msg_types)
 
         preview_msg = next(m for m in dummy_ws.sent if isinstance(m, dict) and m.get("type") == "preview")
