@@ -10,8 +10,8 @@ class Settings:
     
     # Base filesystem paths
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    FRONTEND_DIST: str = os.path.join(BASE_DIR, "frontend", "dist")
-    STATIC_DIR: str = os.path.join(BASE_DIR, "static")
+    FRONTEND_DIST: str = os.path.normpath(os.path.join(BASE_DIR, "..", "frontend", "dist"))
+    STATIC_DIR: str = os.path.join(BASE_DIR, "legacy", "static")
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
     DATA_DIR: str = os.path.join(BASE_DIR, "data")
     MODELS_DIR: str = os.path.join(BASE_DIR, "models")

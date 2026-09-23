@@ -5,6 +5,8 @@ echo   KU SRC Smart Traffic Dashboard - Setup Utility
 echo ===================================================
 echo.
 
+cd /d "%~dp0.."
+
 :: Check if Python is installed
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -52,9 +54,9 @@ echo Upgrading pip inside virtual environment...
 v\Scripts\python.exe -m pip install --upgrade pip
 
 echo.
-echo Installing dependencies from requirements.txt...
+echo Installing dependencies from backend\requirements.txt...
 echo This might take a few minutes (downloading torch, ultralytics, streamlit)...
-v\Scripts\python.exe -m pip install -r requirements.txt
+v\Scripts\python.exe -m pip install -r backend\requirements.txt
 
 if %errorlevel% neq 0 (
     echo.
@@ -76,10 +78,13 @@ echo ===================================================
 echo [SUCCESS] Setup completed successfully!
 echo ===================================================
 echo.
-echo To run the Streamlit dashboard:
-echo   v\Scripts\python.exe -m streamlit run app.py
+echo To run the React dashboard (FastAPI):
+echo   cd backend ^&^& ..\v\Scripts\python.exe server.py
 echo.
-echo To run the OpenCV Desktop app:
-echo   v\Scripts\python.exe main.py
+echo To run the legacy Streamlit dashboard:
+echo   cd backend ^&^& ..\v\Scripts\python.exe -m streamlit run legacy\app.py
+echo.
+echo To run the legacy OpenCV Desktop app:
+echo   cd backend ^&^& ..\v\Scripts\python.exe -m legacy.main
 echo.
 pause

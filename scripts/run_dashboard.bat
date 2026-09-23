@@ -5,8 +5,10 @@ echo   Starting KU SRC Smart Traffic React Dashboard...
 echo ========================================================
 echo.
 
+cd /d "%~dp0.."
+
 if exist .venv\Scripts\python.exe (
-    set PYTHON_EXEC=.venv\Scripts\python.exe
+    set PYTHON_EXEC=%CD%\.venv\Scripts\python.exe
 ) else (
     set PYTHON_EXEC=python
 )
@@ -16,5 +18,6 @@ echo.
 echo Opening browser at http://localhost:8000 ...
 start "" http://localhost:8000
 
-%PYTHON_EXEC% server.py
+cd backend
+"%PYTHON_EXEC%" server.py
 pause

@@ -6,14 +6,14 @@
     "C:\\Users\\BOAT\\AppData\\Roaming\\Python\\Python314\\site-packages",
     "C:\\Python314\\Lib\\site-packages",
     "${workspaceFolder}",
-    "${workspaceFolder}\\src"
+    "${workspaceFolder}\\backend"
   ],
   "python.autoComplete.extraPaths": [
     "${workspaceFolder}\\.venv\\Lib\\site-packages",
     "C:\\Users\\BOAT\\AppData\\Roaming\\Python\\Python314\\site-packages",
     "C:\\Python314\\Lib\\site-packages",
     "${workspaceFolder}",
-    "${workspaceFolder}\\src"
+    "${workspaceFolder}\\backend"
   ],
   "python.analysis.diagnosticSeverityOverrides": {
     "reportMissingImports": "none",
