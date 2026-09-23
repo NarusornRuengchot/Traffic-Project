@@ -11,8 +11,8 @@ services:
       - "8000:8000"
     volumes:
       # Persistent storage for uploaded videos and custom model weights
-      - ./uploads:/app/uploads
-      - ./models:/app/models
+      - ./backend/uploads:/app/uploads
+      - ./backend/models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
     deploy:

@@ -34,21 +34,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -U pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code, models, and configs
-COPY src/ ./src/
-COPY static/ ./static/
-COPY server.py ai_engine.py custom_tracker.yaml ./
-COPY *.pt ./
+COPY backend/src/ ./src/
+COPY backend/legacy/static/ ./legacy/static/
+COPY backend/server.py backend/ai_engine.py backend/custom_tracker.yaml ./
+COPY backend/models/ ./models/
 
-# Copy built React frontend from Stage 1
-COPY --from=frontend-builder /build/frontend/dist ./frontend/dist
+# Copy built React frontend from Stage 1 (settings.FRONTEND_DIST = <backend>/../frontend/dist)
+COPY --from=frontend-builder /build/frontend/dist /frontend/dist
 
-# Create uploads and models directory
-RUN mkdir -p uploads models
+# Create uploads directory
+RUN mkdir -p uploads
 
 # Expose FastAPI & WebSocket port
 EXPOSE 8000
