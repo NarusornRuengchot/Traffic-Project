@@ -6,7 +6,7 @@
     "codespaces": {
       "openFiles": [
         "README.md",
-        "backend/legacy/app.py"
+        "backend/server.py"
       ]
     },
     "vscode": {
@@ -19,15 +19,15 @@
   },
   "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f backend/requirements.txt ] && pip3 install --user -r backend/requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
   "postAttachCommand": {
-    "server": "cd backend && streamlit run legacy/app.py--server.enableCORS false --server.enableXsrfProtection false"
+    "server": "cd backend && python server.py"
   },
   "portsAttributes": {
-    "8501": {
+    "8000": {
       "label": "Application",
       "onAutoForward": "openPreview"
     }
   },
   "forwardPorts": [
-    8501
+    8000
   ]
 }

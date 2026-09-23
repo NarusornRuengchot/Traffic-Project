@@ -17,6 +17,9 @@ from src.api.routers.media import router as media_router
 from src.api.routers.reports import router as reports_router
 from src.api.routers.cctv import router as cctv_router
 from src.api.routers.stream import router as stream_router
+from src.api.routers.benchmark import router as benchmark_router
+from src.api.routers.auth import router as auth_router
+from src.api.routers.business import router as business_router
 
 # Backward compatibility re-exports for existing tests & scripts
 from src.api.routers.media import (
@@ -73,6 +76,9 @@ app.include_router(media_router)
 app.include_router(reports_router)
 app.include_router(cctv_router)
 app.include_router(stream_router)
+app.include_router(benchmark_router)
+app.include_router(auth_router)
+app.include_router(business_router)
 
 @app.on_event("startup")
 async def on_startup():

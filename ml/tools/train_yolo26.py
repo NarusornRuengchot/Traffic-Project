@@ -49,8 +49,9 @@ def train():
 
     best_weight = os.path.join(PROJECT, NAME, "weights", "best.pt")
     if os.path.exists(best_weight):
-        dest = os.path.join("models", "best_yolo26.pt")
-        os.makedirs("models", exist_ok=True)
+        models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "backend", "models")
+        dest = os.path.normpath(os.path.join(models_dir, "best_yolo26.pt"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         import shutil
         shutil.copyfile(best_weight, dest)
         print(f"\n🎉 Training complete! Best YOLO26 model copied to: {dest}")

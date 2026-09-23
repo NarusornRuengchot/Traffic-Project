@@ -273,19 +273,9 @@ class TrafficPipeline:
         real_time_str = current_real_time.strftime("%H:%M:%S")
         real_time_full_str = current_real_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        # 7. Incident & Anomaly Detection
-        new_incidents = self.incident_detector.check_incidents(
-            track_ids=active_ids,
-            centroids=centroids,
-            speeds=speeds_list,
-            class_names=c_names,
-            mid_x=mid_x,
-            swap_directions=swap_directions,
-            current_time_sec=timestamp_sec,
-            real_time_str=real_time_str,
-            fps=fps
-        )
-        incident_ids = {inc["vehicle_id"] for inc in self.incident_detector.active_incidents}
+        # 7. Incident & Anomaly Detection (Disabled as requested to avoid false alarms)
+        new_incidents = []
+        incident_ids = set()
 
         # 8. Tripwire Counting with Speed
         new_events, triggered_lines = self.counter.check_crossovers(
@@ -358,8 +348,8 @@ class TrafficPipeline:
             "traffic_level_color": traffic_level.color_hex,
             "class_counts": self.counter.class_counts.copy(),
             "new_events": new_events,
-            "new_incidents": new_incidents,
-            "active_incidents": self.incident_detector.active_incidents[-5:]
+            "new_incidents": [],
+            "active_incidents": []
         }
 
         self.analytics.record_telemetry(telemetry)

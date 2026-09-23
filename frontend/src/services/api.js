@@ -102,5 +102,138 @@ export const api = {
 
   getReportExportUrl(date = null) {
     return date ? `${API_BASE}/api/reports/export?date=${date}` : `${API_BASE}/api/reports/export`;
+  },
+
+  async getBenchmarkPresets() {
+    const res = await fetch(`${API_BASE}/api/benchmark/presets`);
+    return await res.json();
+  },
+
+  async runBenchmark({ video_source = 'IMG_1357.MOV', models = [], sample_frames = 10, conf_threshold = 0.18, img_size = 480 } = {}) {
+    const res = await fetch(`${API_BASE}/api/benchmark/compare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_source,
+        models,
+        sample_frames,
+        conf_threshold,
+        img_size
+      })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || 'การทดสอบความแม่นยำล้มเหลว');
+    }
+    return await res.json();
+  },
+
+  // --- Auth & Users API ---
+  async login(username_or_email, password) {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username_or_email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'เข้าสู่ระบบไม่สำเร็จ');
+    return data;
+  },
+
+  async register(userData) {
+    const res = await fetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'สมัครสมาชิกไม่สำเร็จ');
+    return data;
+  },
+
+  async getMe(token) {
+    const res = await fetch(`${API_BASE}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.user;
+  },
+
+  async getDemoAccounts() {
+    const res = await fetch(`${API_BASE}/api/auth/demo-accounts`);
+    return await res.json();
+  },
+
+  // --- Business & Branch API ---
+  async getBusinessDashboard(businessId = null, date = null) {
+    const params = new URLSearchParams();
+    if (businessId) params.append('business_id', businessId);
+    if (date) params.append('date', date);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${API_BASE}/api/business/dashboard${query}`);
+    return await res.json();
+  },
+
+  async getBusinesses() {
+    const res = await fetch(`${API_BASE}/api/business/companies`);
+    return await res.json();
+  },
+
+  async createBusiness(businessData) {
+    const res = await fetch(`${API_BASE}/api/business/companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(businessData)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'บันทึกข้อมูลธุรกิจไม่สำเร็จ');
+    return data;
+  },
+
+  async updateBusiness(businessId, businessData) {
+    const res = await fetch(`${API_BASE}/api/business/companies/${businessId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(businessData)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'อัปเดตข้อมูลธุรกิจไม่สำเร็จ');
+    return data;
+  },
+
+  async deleteBusiness(businessId) {
+    const res = await fetch(`${API_BASE}/api/business/companies/${businessId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'ลบข้อมูลธุรกิจไม่สำเร็จ');
+    return data;
+  },
+
+  async getBusinessCameras(businessId = null) {
+    const url = businessId ? `${API_BASE}/api/business/cameras?business_id=${businessId}` : `${API_BASE}/api/business/cameras`;
+    const res = await fetch(url);
+    return await res.json();
+  },
+
+  async createBusinessCamera(cameraData) {
+    const res = await fetch(`${API_BASE}/api/business/cameras`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cameraData)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'บันทึกกล้องไม่สำเร็จ');
+    return data;
+  },
+
+  async deleteBusinessCamera(cameraId) {
+    const res = await fetch(`${API_BASE}/api/business/cameras/${cameraId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'ลบกล้องไม่สำเร็จ');
+    return data;
   }
 };

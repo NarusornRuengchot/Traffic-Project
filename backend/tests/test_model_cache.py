@@ -2,7 +2,6 @@ import unittest
 import os
 from src.core.vehicle_detector import VehicleDetector, _MODEL_CACHE
 from src.core.traffic_pipeline import TrafficPipeline
-from src.utils.file_helper import resolve_model_path
 
 class TestModelCacheAndPreview(unittest.TestCase):
     def test_model_cache_reuse(self):
@@ -12,8 +11,7 @@ class TestModelCacheAndPreview(unittest.TestCase):
         self.assertIsNotNone(model_inst1)
 
         # Check in _MODEL_CACHE
-        resolved = resolve_model_path("yolov11n.pt")
-        self.assertIn(resolved, _MODEL_CACHE)
+        self.assertIn(detector1.model_path, _MODEL_CACHE)
 
         # Second load (must hit cache and reuse the exact same YOLO instance)
         detector2 = VehicleDetector(model_name="yolov11n.pt")
