@@ -7,8 +7,12 @@ from ultralytics import YOLO
 # Script: สกัดภาพจากวิดีโอ + ทำ Auto-Bounding Box (มอเตอร์ไซค์ + คนขับ)
 # ============================================================
 
-VIDEO_PATH = "uploads/IMG_1357.MOV"
-OUTPUT_DIR = os.path.join("data", "dataset_motorcycles") if os.path.exists(os.path.join("data", "dataset_motorcycles")) else "dataset_motorcycles"
+ML_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BACKEND_DIR = os.path.join(os.path.dirname(ML_DIR), "backend")
+
+VIDEO_PATH = os.path.join(BACKEND_DIR, "uploads", "IMG_1357.MOV")
+MODEL_PATH = os.path.join(BACKEND_DIR, "models", "yolov11n.pt")
+OUTPUT_DIR = os.path.join(ML_DIR, "dataset_motorcycles")
 TARGET_FRAMES = 50       # จำนวนภาพที่ต้องการ (30-50 ภาพ)
 MIN_FRAME_GAP = 25       # เว้นระยะห่างระหว่างเฟรม (กันภาพซ้ำติดๆ กัน)
 
@@ -74,7 +78,7 @@ def main():
         os.makedirs(d, exist_ok=True)
 
     print("🚀 กำลังโหลดโมเดล YOLO เพื่อช่วย Auto-Annotate...")
-    model = YOLO("yolov11n.pt") # ใช้ COCO model เพราะแยกคน (0) กับมอเตอร์ไซค์ (3) ได้ชัดเจน
+    model = YOLO(MODEL_PATH) # ใช้ COCO model เพราะแยกคน (0) กับมอเตอร์ไซค์ (3) ได้ชัดเจน
 
     cap = cv2.VideoCapture(VIDEO_PATH)
     total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))

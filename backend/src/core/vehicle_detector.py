@@ -61,7 +61,8 @@ class VehicleDetector:
     def load_model(self, model_name: str):
         resolved = resolve_model_path(model_name)
         if not os.path.exists(resolved):
-            fallback = "yolov11n.pt" if os.path.exists("yolov11n.pt") else "yolov8n.pt"
+            default_path = resolve_model_path("yolov11n.pt")
+            fallback = default_path if os.path.exists(default_path) else "yolov8n.pt"
             if os.path.exists(fallback):
                 resolved = fallback
             else:
@@ -84,9 +85,10 @@ class VehicleDetector:
             self.model = YOLO(resolved)
         except Exception as e:
             print(f"⚠️ Error loading YOLO model '{resolved}': {e}. Attempting default yolov11n.pt fallback.")
-            self.model = YOLO("yolov11n.pt")
-            self.model_name = "yolov11n.pt"
-            resolved = "yolov11n.pt"
+            resolved = resolve_model_path("yolov11n.pt")
+            self.model = YOLO(resolved)
+            self.model_name = os.path.basename(resolved)
+            self.model_path = resolved
 
         # Dynamically inspect model.names from model metadata
         self.class_map = {}
