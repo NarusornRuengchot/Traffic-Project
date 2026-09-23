@@ -1,6 +1,17 @@
 import React from 'react';
 
-export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleTheme, activeTab = 'live', onSelectTab }) {
+export function Header({
+  isConnected,
+  isPlaying,
+  isLive,
+  fps,
+  theme,
+  onToggleTheme,
+  activeTab = 'live',
+  onSelectTab,
+  currentUser,
+  onOpenAuth
+}) {
   return (
     <header className="glass-card" style={{ padding: '16px 24px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -21,18 +32,18 @@ export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleThe
           <h1 style={{ fontSize: '1.25rem', fontWeight: '800', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
             KU SRC Smart Traffic
             <span style={{ fontSize: '0.75rem', fontWeight: '600', padding: '2px 8px', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
-              v2.3 Live AI + SQLite
+              v2.4 Business & Mobile
             </span>
           </h1>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Real-time Vehicle Detection, Tracking, Peak Hours & Academic Analytics
+            Real-time Vehicle AI, Business Footfall Analytics & Multi-Branch CCTV
           </p>
         </div>
       </div>
 
       {/* Navigation Tab Switcher */}
       {onSelectTab && (
-        <div style={{ display: 'flex', background: 'var(--bg-input)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
+        <div className="desktop-nav-tabs" style={{ display: 'flex', background: 'var(--bg-input)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
           <button
             type="button"
             onClick={() => onSelectTab('live')}
@@ -49,6 +60,23 @@ export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleThe
             }}
           >
             📹 หน้าตรวจจับสด (Live)
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectTab('business')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '700',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backgroundColor: activeTab === 'business' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'business' ? '#fff' : 'var(--text-secondary)'
+            }}
+          >
+            🏢 ข้อมูลธุรกิจ (Business)
           </button>
           <button
             type="button"
@@ -131,6 +159,34 @@ export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleThe
             ⚡ {fps} FPS
           </div>
         )}
+
+        {/* User Auth Profile Button */}
+        <button
+          onClick={onOpenAuth}
+          className="btn"
+          style={{
+            padding: '8px 14px',
+            fontSize: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: currentUser ? 'rgba(37, 99, 235, 0.15)' : 'var(--bg-input)',
+            color: currentUser ? '#60a5fa' : 'var(--text-main)',
+            border: currentUser ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid var(--border-color)',
+            borderRadius: '10px'
+          }}
+          title={currentUser ? `บัญชี: ${currentUser.full_name || currentUser.username} (${currentUser.role})` : "เข้าสู่ระบบ / จัดการบัญชี"}
+        >
+          <span>{currentUser ? (currentUser.role === 'admin' ? '👑' : '👤') : '🔐'}</span>
+          <span style={{ fontWeight: 600 }}>
+            {currentUser ? currentUser.username : 'เข้าสู่ระบบ'}
+          </span>
+          {currentUser && (
+            <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)' }}>
+              {currentUser.role}
+            </span>
+          )}
+        </button>
 
         {/* Theme Switcher */}
         <button

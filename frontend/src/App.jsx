@@ -7,8 +7,10 @@ import { VehicleBreakdown } from './components/VehicleBreakdown';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { EventLogTable } from './components/EventLogTable';
 import { HistoryReport } from './components/HistoryReport';
-import { IncidentAlerts } from './components/IncidentAlerts';
 import { ModelComparison } from './components/ModelComparison';
+import { BusinessDashboard } from './components/BusinessDashboard';
+import { AuthModal } from './components/AuthModal';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
 import { api } from './services/api';
 
@@ -17,7 +19,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('live');
   const [showCalibration, setShowCalibration] = useState(false);
   const [restCalibrationPreview, setRestCalibrationPreview] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const abortControllerRef = React.useRef(null);
+
+  // Auto-restore session from stored token
+  useEffect(() => {
+    const token = localStorage.getItem('ku_traffic_token');
+    if (token) {
+      api.getMe(token)
+        .then((res) => {
+          if (res && res.user) {
+            setCurrentUser(res.user);
+          } else {
+            localStorage.removeItem('ku_traffic_token');
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem('ku_traffic_token');
+        });
+    }
+  }, []);
 
   // Calibration and Stream Settings
   const [config, setConfig] = useState({
@@ -143,7 +165,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px' }}>
+    <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px', paddingBottom: '80px' }}>
       {/* Top Header with Tab Switcher */}
       <Header
         isConnected={isConnected}
@@ -154,9 +176,11 @@ export default function App() {
         onToggleTheme={toggleTheme}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthOpen(true)}
       />
 
-      {/* Conditional Rendering: Live Monitoring vs Historical Reports vs Model Benchmark */}
+      {/* Conditional Rendering: Live Monitoring vs Historical Reports vs Model Benchmark vs Business Analytics */}
       {activeTab === 'reports' ? (
         <HistoryReport />
       ) : activeTab === 'benchmark' ? (
@@ -164,6 +188,11 @@ export default function App() {
           currentSource={config.video_path}
           onSelectModel={(mName) => handleConfigChange('model_name', mName)}
           onSwitchToLive={() => setActiveTab('live')}
+        />
+      ) : activeTab === 'business' ? (
+        <BusinessDashboard
+          currentUser={currentUser}
+          onOpenAuthModal={() => setIsAuthOpen(true)}
         />
       ) : (
         <>
@@ -224,9 +253,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Real-time Incident Alerts Drawer */}
-              <IncidentAlerts incidents={telemetry?.active_incidents || []} />
-
               <VideoPlayer
                 currentFrame={currentFrame}
                 isPlaying={isPlaying}
@@ -254,6 +280,30 @@ export default function App() {
           </div>
         </>
       )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthOpen(true)}
+      />
+
+      {/* Auth Modal (Login / Register / Profile) */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        currentUser={currentUser}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          setIsAuthOpen(false);
+        }}
+        onLogout={() => {
+          localStorage.removeItem('ku_traffic_token');
+          setCurrentUser(null);
+          setIsAuthOpen(false);
+        }}
+      />
     </div>
   );
 }
