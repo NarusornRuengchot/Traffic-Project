@@ -52,6 +52,23 @@ export function Header({ isConnected, isPlaying, isLive, fps, theme, onToggleThe
           </button>
           <button
             type="button"
+            onClick={() => onSelectTab('benchmark')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '700',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              backgroundColor: activeTab === 'benchmark' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'benchmark' ? '#fff' : 'var(--text-secondary)'
+            }}
+          >
+            ⚖️ เปรียบเทียบโมเดล AI (Benchmark)
+          </button>
+          <button
+            type="button"
             onClick={() => onSelectTab('reports')}
             style={{
               padding: '8px 16px',

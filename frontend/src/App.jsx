@@ -8,6 +8,7 @@ import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { EventLogTable } from './components/EventLogTable';
 import { HistoryReport } from './components/HistoryReport';
 import { IncidentAlerts } from './components/IncidentAlerts';
+import { ModelComparison } from './components/ModelComparison';
 import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
 import { api } from './services/api';
 
@@ -155,9 +156,15 @@ export default function App() {
         onSelectTab={setActiveTab}
       />
 
-      {/* Conditional Rendering: Live Monitoring vs Historical Reports */}
+      {/* Conditional Rendering: Live Monitoring vs Historical Reports vs Model Benchmark */}
       {activeTab === 'reports' ? (
         <HistoryReport />
+      ) : activeTab === 'benchmark' ? (
+        <ModelComparison
+          currentSource={config.video_path}
+          onSelectModel={(mName) => handleConfigChange('model_name', mName)}
+          onSwitchToLive={() => setActiveTab('live')}
+        />
       ) : (
         <>
           {/* KPI Metric Summary Cards */}
@@ -178,6 +185,7 @@ export default function App() {
                 setCctvTestResult={setCctvTestResult}
                 wsResources={resources}
                 onSwitchModel={switchModel}
+                onOpenBenchmark={() => setActiveTab('benchmark')}
               />
             </div>
 

@@ -102,5 +102,29 @@ export const api = {
 
   getReportExportUrl(date = null) {
     return date ? `${API_BASE}/api/reports/export?date=${date}` : `${API_BASE}/api/reports/export`;
+  },
+
+  async getBenchmarkPresets() {
+    const res = await fetch(`${API_BASE}/api/benchmark/presets`);
+    return await res.json();
+  },
+
+  async runBenchmark({ video_source = 'IMG_1357.MOV', models = [], sample_frames = 10, conf_threshold = 0.18, img_size = 480 } = {}) {
+    const res = await fetch(`${API_BASE}/api/benchmark/compare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_source,
+        models,
+        sample_frames,
+        conf_threshold,
+        img_size
+      })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || 'การทดสอบความแม่นยำล้มเหลว');
+    }
+    return await res.json();
   }
 };
