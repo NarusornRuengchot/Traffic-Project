@@ -10,7 +10,7 @@ __pycache__/
 *.avi
 
 # YOLO weights (avoid pushing large weights, they will download automatically)
-*.pt
+
 
 # Streamlit local settings
 .streamlit/
