@@ -9,3 +9,7 @@ fastapi
 uvicorn[standard]
 websockets
 python-multipart
+sqlalchemy
+pymysql
+cryptography
+python-dotenv
