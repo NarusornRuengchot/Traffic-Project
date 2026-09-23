@@ -31,13 +31,19 @@ if %errorlevel% EQU 0 (
 )
 
 :: Create virtual environment if it doesn't exist
+set VENV_DIR=.venv
+if exist .venv (
+    echo Virtual environment ^(.venv^) already exists.
+    goto venv_done
+)
 if exist v (
+    set VENV_DIR=v
     echo Virtual environment ^(v^) already exists.
     goto venv_done
 )
 
-echo Creating virtual environment ^(v^)...
-python -m venv v
+echo Creating virtual environment ^(.venv^)...
+python -m venv .venv
 if errorlevel 1 (
     echo [ERROR] Failed to create virtual environment.
     pause
@@ -49,12 +55,12 @@ echo Virtual environment created successfully.
 
 echo.
 echo Upgrading pip inside virtual environment...
-v\Scripts\python.exe -m pip install --upgrade pip
+%VENV_DIR%\Scripts\python.exe -m pip install --upgrade pip
 
 echo.
 echo Installing dependencies from requirements.txt...
-echo This might take a few minutes (downloading torch, ultralytics, streamlit)...
-v\Scripts\python.exe -m pip install -r requirements.txt
+echo This might take a few minutes (downloading torch, ultralytics, fastapi)...
+%VENV_DIR%\Scripts\python.exe -m pip install -r requirements.txt
 
 if %errorlevel% neq 0 (
     echo.
@@ -76,10 +82,11 @@ echo ===================================================
 echo [SUCCESS] Setup completed successfully!
 echo ===================================================
 echo.
-echo To run the Streamlit dashboard:
-echo   v\Scripts\python.exe -m streamlit run app.py
+echo To run the Smart Traffic Web Dashboard:
+echo   run_dashboard.bat
+echo   OR: %VENV_DIR%\Scripts\python.exe server.py
 echo.
-echo To run the OpenCV Desktop app:
-echo   v\Scripts\python.exe main.py
+echo To run the OpenCV Desktop processor:
+echo   %VENV_DIR%\Scripts\python.exe main.py
 echo.
 pause

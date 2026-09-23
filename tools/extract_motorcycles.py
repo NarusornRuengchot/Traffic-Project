@@ -8,7 +8,7 @@ from ultralytics import YOLO
 # ============================================================
 
 VIDEO_PATH = "uploads/IMG_1357.MOV"
-OUTPUT_DIR = "dataset_motorcycles"
+OUTPUT_DIR = os.path.join("data", "dataset_motorcycles") if os.path.exists(os.path.join("data", "dataset_motorcycles")) else "dataset_motorcycles"
 TARGET_FRAMES = 50       # จำนวนภาพที่ต้องการ (30-50 ภาพ)
 MIN_FRAME_GAP = 25       # เว้นระยะห่างระหว่างเฟรม (กันภาพซ้ำติดๆ กัน)
 

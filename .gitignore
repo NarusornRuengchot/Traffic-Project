@@ -20,3 +20,13 @@ __pycache__/
 venv/
 .venv/
 env/
+v/
+
+# SQLite journal/wal files
+*.db-wal
+*.db-shm
+*.db-journal
+
+# OS temporary files
+.DS_Store
+Thumbs.db

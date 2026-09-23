@@ -29,15 +29,33 @@ seminar/
 │   └── dist/                      # Production Build (served automatically by FastAPI)
 │
 ├── src/                           # 🐍 Modular Python Core Engine
+│   ├── api/                       # REST & WebSocket route handlers
+│   ├── config/                    # Environment & configuration settings
 │   ├── core/                      # VehicleDetector, VehicleTracker, LaneCounter, Analytics, Pipeline
-│   ├── visualizer/                # FrameAnnotator (Calibration & HUD Overlays)
-│   ├── schema/                    # Telemetry & Configuration Dataclasses
-│   └── utils/                     # Video & Model Discovery Helpers
+│   ├── database/                  # SQLite analytics & incident logging
+│   ├── services/                  # StreamWorker background tasks
+│   ├── utils/                     # Video & Model Discovery Helpers
+│   └── visualizer/                # FrameAnnotator (Calibration & HUD Overlays)
 │
+├── models/                        # 🧠 YOLO Weights (best.pt, yolo26n.pt, yolo26s.pt, yolov11n.pt)
+├── data/                          # 📊 SQLite database & datasets
+│   ├── traffic_analytics.db
+│   └── dataset_motorcycles/       # 50 auto-labeled motorcycle frames + data.yaml
+│
+├── uploads/                       # 🎬 Video files (e.g., IMG_1357.MOV)
+├── tools/                         # 🛠️ Training & fine-tuning utilities
+│   ├── notebooks/                 # Colab & Kaggle fine-tuning notebooks
+│   ├── train_yolo26.py
+│   ├── extract_motorcycles.py
+│   └── upload_to_roboflow.py
+│
+├── tests/                         # 🧪 Automated Test Suite (27 test cases)
 ├── server.py                      # 🚀 FastAPI WebSocket & REST Streaming Server
-├── ai_engine.py                   # Backward-compatible Adapter
-├── app.py                         # Streamlit Interface (Alternative Python UI)
-├── main.py                        # Desktop OpenCV Window (Alternative Desktop UI)
+├── main.py                        # 🖥️ Desktop OpenCV Window (Alternative Desktop UI)
+├── ai_engine.py                   # 🔄 Backward-compatible Adapter
+├── run.sh                         # 🐧 Linux Cloud start script (FastAPI on custom port)
+├── run_dashboard.bat              # 🪟 Windows quick start batch script
+├── install.bat                    # 📦 Windows setup & dependency installer
 ├── requirements.txt
 └── README.md
 ```
@@ -47,34 +65,30 @@ seminar/
 ## ⚙️ Quick Start Guide
 
 ### 1. Install Dependencies
-Make sure you have Python 3.9+ and Node.js 18+ installed:
+Make sure you have Python 3.9 - 3.12 and Node.js 18+ installed:
 ```bash
-# Install Python packages
-pip install -r requirements.txt
+# Windows automatic setup
+install.bat
 
-# Install React dependencies (Optional if running pre-built dist)
-cd frontend
-npm install
-npm run build
-cd ..
+# Or manual installation
+pip install -r requirements.txt
 ```
 
 ### 2. Run the React Web Dashboard (Recommended)
-Simply start the FastAPI backend:
+On Windows:
+```cmd
+run_dashboard.bat
+```
+Or run Python directly:
 ```bash
 python server.py
 ```
 Open your browser and navigate to:
 👉 **`http://localhost:8000`**
 
----
-
-### 3. Alternative Interfaces
-* **Streamlit Python Dashboard:**
-  ```bash
-  python -m streamlit run app.py
-  ```
+### 3. Alternative Desktop Interface
 * **Desktop OpenCV Visualizer:**
   ```bash
   python main.py
   ```
+

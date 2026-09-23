@@ -11,8 +11,7 @@ class TestModelCacheAndPreview(unittest.TestCase):
         self.assertIsNotNone(model_inst1)
 
         # Check in _MODEL_CACHE
-        resolved = "yolov11n.pt"
-        self.assertIn(resolved, _MODEL_CACHE)
+        self.assertIn(detector1.model_path, _MODEL_CACHE)
 
         # Second load (must hit cache and reuse the exact same YOLO instance)
         detector2 = VehicleDetector(model_name="yolov11n.pt")
