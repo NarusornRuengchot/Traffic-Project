@@ -23,6 +23,7 @@ class Settings:
     
     # Video & Stream defaults
     DEFAULT_MODEL: str = "yolo26n.pt"
+    DEFAULT_DEVICE: str = os.getenv("DEVICE", "cuda")   # "cuda" for GPU, "cpu" to force CPU
     DEFAULT_CONF_THRESHOLD: float = 0.18
     DEFAULT_INFERENCE_SIZE: int = 480
     DEFAULT_STREAM_WIDTH: int = 768

@@ -21,7 +21,10 @@ class AppState:
             return cls._instance
 
     def _init_state(self):
-        self.global_engine = TrafficPipeline(model_name=settings.DEFAULT_MODEL)
+        self.global_engine = TrafficPipeline(
+            model_name=settings.DEFAULT_MODEL,
+            device=settings.DEFAULT_DEVICE
+        )
         self.active_worker: Optional[StreamWorker] = None
         self._worker_lock = threading.Lock()
 

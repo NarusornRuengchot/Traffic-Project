@@ -22,7 +22,10 @@ async def websocket_stream_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     worker = StreamWorker(
-        engine=TrafficPipeline(model_name=settings.DEFAULT_MODEL),
+        engine=TrafficPipeline(
+            model_name=settings.DEFAULT_MODEL,
+            device=settings.DEFAULT_DEVICE
+        ),
         target_width=settings.DEFAULT_STREAM_WIDTH,
         inference_size=settings.DEFAULT_INFERENCE_SIZE,
         jpeg_quality=settings.DEFAULT_JPEG_QUALITY
