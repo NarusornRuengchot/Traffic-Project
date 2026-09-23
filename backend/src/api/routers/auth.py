@@ -27,7 +27,8 @@ async def register_user(payload: Dict[str, Any] = Body(...)):
     email = payload.get("email", "").strip().lower()
     password = payload.get("password", "")
     full_name = payload.get("full_name", "").strip()
-    role = payload.get("role", "operator")  # admin, business_owner, operator
+    # Public registration must never be able to self-assign admin privileges.
+    role = "user"
     business_id = payload.get("business_id")
 
     if not username or len(username) < 3:

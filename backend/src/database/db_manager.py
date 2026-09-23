@@ -4,33 +4,109 @@ import datetime
 import threading
 from typing import List, Dict, Any, Optional, Tuple
 
+import pymysql
+from pymysql.cursors import DictCursor
+from dotenv import load_dotenv
+
 from src.utils.security import hash_password, verify_password
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 DEFAULT_DB_PATH = os.path.join(DB_DIR, "traffic_analytics.db")
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+load_dotenv(os.path.join(PROJECT_DIR, ".env"))
+
+
+class _MySQLCursor:
+    """Small compatibility layer so existing SQLite-style queries keep working."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    @staticmethod
+    def _sql(query: str) -> str:
+        return query.replace("?", "%s")
+
+    def execute(self, query, args=None):
+        return self._cursor.execute(self._sql(query), args)
+
+    def executemany(self, query, args):
+        return self._cursor.executemany(self._sql(query), args)
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+
+class _MySQLConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self):
+        return _MySQLCursor(self._connection.cursor())
+
+    def execute(self, query, args=None):
+        cursor = self.cursor()
+        cursor.execute(query, args)
+        return cursor
+
+    def commit(self):
+        self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
+
+    def close(self):
+        self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
 
 class DatabaseManager:
     """
-    High-performance, thread-safe SQLite database manager for traffic analytics.
-    Uses Write-Ahead Logging (WAL) for non-blocking concurrent writes and reads.
+    Thread-safe database manager. Production uses the MySQL database configured in
+    .env; an explicit db_path is retained for the existing SQLite test suite.
     """
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls, db_path: str = DEFAULT_DB_PATH):
+    def __new__(cls, db_path: Optional[str] = None):
         with cls._lock:
-            if db_path != DEFAULT_DB_PATH:
+            if db_path is not None:
                 # Dedicated isolated instance for custom paths (e.g. unit testing)
                 inst = super(DatabaseManager, cls).__new__(cls)
+                inst.backend = "sqlite"
                 inst._init_db(db_path)
                 return inst
 
             if cls._instance is None:
                 cls._instance = super(DatabaseManager, cls).__new__(cls)
-                cls._instance._init_db(db_path)
+                cls._instance.backend = "mysql"
+                cls._instance._local = threading.local()
+                cls._instance._mysql_initialized = False
+                cls._instance._mysql_initializing = False
             return cls._instance
 
     def _init_db(self, db_path: str):
+        if self.backend == "mysql":
+            self._init_mysql()
+            return
+
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._local = threading.local()
@@ -107,13 +183,13 @@ class DatabaseManager:
 
             # 4. Users and Authentication table
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS traffic_users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
                     email TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
                     full_name TEXT,
-                    role TEXT DEFAULT 'operator', -- admin, business_owner, operator
+                    role TEXT DEFAULT 'user', -- admin, user
                     business_id INTEGER,
                     is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -177,18 +253,18 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON traffic_snapshots(date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_date ON traffic_incidents(date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_type ON traffic_incidents(incident_type);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON traffic_users(username);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON traffic_users(email);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_business_cameras ON business_cameras(business_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_business_metrics ON business_daily_metrics(business_id, date);")
 
             # Seed default admin user if table is empty
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM users;")
+            cur.execute("SELECT COUNT(*) FROM traffic_users;")
             if cur.fetchone()[0] == 0:
                 admin_hash = hash_password("admin123")
                 cur.execute("""
-                    INSERT INTO users (username, email, password_hash, full_name, role)
+                    INSERT INTO traffic_users (username, email, password_hash, full_name, role)
                     VALUES (?, ?, ?, ?, ?);
                 """, ("admin", "admin@kusrc.ac.th", admin_hash, "ผู้ดูแลระบบ (System Admin)", "admin"))
 
@@ -210,8 +286,183 @@ class DatabaseManager:
 
             conn.commit()
 
+    def _init_mysql(self):
+        """Create the application tables in the configured phpMyAdmin database."""
+        self._mysql_initializing = True
+        try:
+            with self.get_connection() as conn:
+                schema = (
+                    """CREATE TABLE IF NOT EXISTS traffic_users (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        username VARCHAR(100) NOT NULL UNIQUE,
+                        email VARCHAR(255) NULL UNIQUE,
+                        password_hash VARCHAR(255) NOT NULL,
+                        full_name VARCHAR(255) NULL,
+                        role VARCHAR(40) NOT NULL DEFAULT 'user',
+                        business_id INT NULL,
+                        is_active TINYINT(1) NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS vehicle_events (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        timestamp_sec DOUBLE NULL,
+                        real_time VARCHAR(32) NOT NULL,
+                        date DATE NOT NULL,
+                        hour INT NOT NULL,
+                        vehicle_id INT NOT NULL,
+                        vehicle_type VARCHAR(40) NOT NULL,
+                        direction VARCHAR(20) NOT NULL,
+                        speed_kmh DOUBLE DEFAULT 0,
+                        traffic_level VARCHAR(80) NOT NULL,
+                        session_id VARCHAR(255) NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS traffic_snapshots (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        timestamp VARCHAR(32) NOT NULL,
+                        date DATE NOT NULL,
+                        hour INT NOT NULL,
+                        active_vehicles INT NOT NULL,
+                        density_score DOUBLE NOT NULL,
+                        traffic_level VARCHAR(80) NOT NULL,
+                        stall_ratio DOUBLE DEFAULT 0,
+                        avg_speed_kmh DOUBLE DEFAULT 0,
+                        session_id VARCHAR(255) NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS traffic_incidents (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        timestamp_sec DOUBLE NULL,
+                        real_time VARCHAR(32) NOT NULL,
+                        date DATE NOT NULL,
+                        hour INT NOT NULL,
+                        incident_type VARCHAR(80) NOT NULL,
+                        severity VARCHAR(40) NOT NULL,
+                        vehicle_id INT NOT NULL,
+                        vehicle_type VARCHAR(40) NOT NULL,
+                        speed_kmh DOUBLE DEFAULT 0,
+                        message TEXT NULL,
+                        session_id VARCHAR(255) NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS businesses (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        business_type VARCHAR(80) DEFAULT 'retail',
+                        branch_code VARCHAR(80) NULL,
+                        address TEXT NULL,
+                        contact_email VARCHAR(255) NULL,
+                        contact_phone VARCHAR(80) NULL,
+                        opening_hour INT DEFAULT 8,
+                        closing_hour INT DEFAULT 22,
+                        target_hourly_traffic INT DEFAULT 100,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS business_cameras (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        business_id INT NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        stream_url TEXT NOT NULL,
+                        camera_type VARCHAR(40) DEFAULT 'entrance',
+                        location_note TEXT NULL,
+                        is_active TINYINT(1) DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB""",
+                    """CREATE TABLE IF NOT EXISTS business_daily_metrics (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        business_id INT NOT NULL,
+                        date DATE NOT NULL,
+                        total_customer_vehicles INT DEFAULT 0,
+                        peak_customer_hour INT DEFAULT 0,
+                        peak_vehicle_count INT DEFAULT 0,
+                        car_count INT DEFAULT 0,
+                        motorcycle_count INT DEFAULT 0,
+                        commercial_truck_count INT DEFAULT 0,
+                        bus_count INT DEFAULT 0,
+                        estimated_footfall INT DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uq_business_date (business_id, date)
+                    ) ENGINE=InnoDB""",
+                )
+                for statement in schema:
+                    conn.execute(statement)
+
+                # Extend the traffic_users table created earlier in phpMyAdmin.
+                for statement in (
+                    "ALTER TABLE traffic_users ADD COLUMN email VARCHAR(255) NULL UNIQUE",
+                    "ALTER TABLE traffic_users ADD COLUMN full_name VARCHAR(255) NULL",
+                    "ALTER TABLE traffic_users ADD COLUMN business_id INT NULL",
+                    "ALTER TABLE traffic_users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
+                ):
+                    try:
+                        conn.execute(statement)
+                    except Exception:
+                        pass
+
+                for statement in (
+                    "CREATE INDEX idx_events_date_hour ON vehicle_events(date, hour)",
+                    "CREATE INDEX idx_events_type ON vehicle_events(vehicle_type)",
+                    "CREATE INDEX idx_events_direction ON vehicle_events(direction)",
+                    "CREATE INDEX idx_snapshots_date ON traffic_snapshots(date)",
+                    "CREATE INDEX idx_incidents_date ON traffic_incidents(date)",
+                    "CREATE INDEX idx_incidents_type ON traffic_incidents(incident_type)",
+                    "CREATE INDEX idx_users_username ON traffic_users(username)",
+                    "CREATE INDEX idx_users_email ON traffic_users(email)",
+                    "CREATE INDEX idx_business_cameras ON business_cameras(business_id)",
+                    "CREATE INDEX idx_business_metrics ON business_daily_metrics(business_id, date)",
+                ):
+                    try:
+                        conn.execute(statement)
+                    except Exception:
+                        pass
+
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) AS total FROM traffic_users")
+                if (cur.fetchone() or {}).get("total", 0) == 0:
+                    cur.execute(
+                        """INSERT INTO traffic_users
+                        (username, email, password_hash, full_name, role)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        ("admin", "admin@kusrc.ac.th", hash_password("admin123"),
+                         "ผู้ดูแลระบบ (System Admin)", "admin"),
+                    )
+
+                cur.execute("SELECT COUNT(*) AS total FROM businesses")
+                if (cur.fetchone() or {}).get("total", 0) == 0:
+                    cur.execute(
+                        """INSERT INTO businesses
+                        (name, business_type, branch_code, address, contact_email,
+                         contact_phone, target_hourly_traffic)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        ("มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตศรีราชา", "campus", "KU-SRC-01",
+                         "199 ม.6 ถ.สุขุมวิท ต.ทุ่งสุขลา อ.ศรีราชา จ.ชลบุรี 20230",
+                         "traffic@src.ku.ac.th", "038-354580", 150),
+                    )
+                conn.commit()
+            self._mysql_initialized = True
+        finally:
+            self._mysql_initializing = False
+
     def get_connection(self) -> sqlite3.Connection:
         """Returns a thread-local SQLite connection with dictionary-like row factory."""
+        if self.backend == "mysql":
+            if not self._mysql_initialized and not self._mysql_initializing:
+                self._init_mysql()
+            if not hasattr(self._local, "conn") or self._local.conn is None:
+                raw = pymysql.connect(
+                    host=os.getenv("DB_HOST", "127.0.0.1"),
+                    port=int(os.getenv("DB_PORT", "3306")),
+                    user=os.getenv("DB_USER"),
+                    password=os.getenv("DB_PASSWORD", ""),
+                    database=os.getenv("DB_NAME"),
+                    charset="utf8mb4",
+                    cursorclass=DictCursor,
+                    autocommit=False,
+                    connect_timeout=10,
+                )
+                self._local.conn = _MySQLConnection(raw)
+            return self._local.conn
+
         if not hasattr(self._local, "conn") or self._local.conn is None:
             conn = sqlite3.connect(self.db_path, timeout=10.0)
             conn.row_factory = sqlite3.Row
@@ -694,7 +945,7 @@ class DatabaseManager:
         email: str,
         password: str,
         full_name: str = "",
-        role: str = "operator",
+        role: str = "user",
         business_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Creates a new user with securely hashed PBKDF2 password."""
@@ -702,7 +953,7 @@ class DatabaseManager:
         cursor = conn.cursor()
         pwd_hash = hash_password(password)
         cursor.execute("""
-            INSERT INTO users (username, email, password_hash, full_name, role, business_id)
+            INSERT INTO traffic_users (username, email, password_hash, full_name, role, business_id)
             VALUES (?, ?, ?, ?, ?, ?);
         """, (username.strip(), email.strip().lower(), pwd_hash, full_name.strip(), role, business_id))
         conn.commit()
@@ -723,7 +974,7 @@ class DatabaseManager:
         cursor.execute("""
             SELECT u.id, u.username, u.email, u.full_name, u.role, u.business_id, u.is_active, u.created_at,
                    b.name as business_name, b.business_type
-            FROM users u
+            FROM traffic_users u
             LEFT JOIN businesses b ON u.business_id = b.id
             WHERE u.id = ?;
         """, (user_id,))
@@ -737,7 +988,7 @@ class DatabaseManager:
         cursor.execute("""
             SELECT u.id, u.username, u.email, u.password_hash, u.full_name, u.role, u.business_id, u.is_active,
                    b.name as business_name, b.business_type
-            FROM users u
+            FROM traffic_users u
             LEFT JOIN businesses b ON u.business_id = b.id
             WHERE u.username = ?;
         """, (username.strip(),))
@@ -751,7 +1002,7 @@ class DatabaseManager:
         cursor.execute("""
             SELECT u.id, u.username, u.email, u.password_hash, u.full_name, u.role, u.business_id, u.is_active,
                    b.name as business_name, b.business_type
-            FROM users u
+            FROM traffic_users u
             LEFT JOIN businesses b ON u.business_id = b.id
             WHERE u.email = ?;
         """, (email.strip().lower(),))
@@ -776,7 +1027,7 @@ class DatabaseManager:
         cursor.execute("""
             SELECT u.id, u.username, u.email, u.full_name, u.role, u.business_id, u.is_active, u.created_at,
                    b.name as business_name
-            FROM users u
+            FROM traffic_users u
             LEFT JOIN businesses b ON u.business_id = b.id
             ORDER BY u.id ASC;
         """)
@@ -1056,12 +1307,12 @@ class DatabaseManager:
             conn.execute("DELETE FROM business_cameras;")
             conn.execute("DELETE FROM business_daily_metrics;")
             conn.execute("DELETE FROM businesses;")
-            conn.execute("DELETE FROM users;")
+            conn.execute("DELETE FROM traffic_users;")
 
             # Re-seed default admin
             admin_hash = hash_password("admin123")
             conn.execute("""
-                INSERT INTO users (username, email, password_hash, full_name, role)
+                INSERT INTO traffic_users (username, email, password_hash, full_name, role)
                 VALUES (?, ?, ?, ?, ?);
             """, ("admin", "admin@kusrc.ac.th", admin_hash, "ผู้ดูแลระบบ (System Admin)", "admin"))
 

@@ -13,3 +13,4 @@ sqlalchemy
 pymysql
 cryptography
 python-dotenv
+firebase-admin

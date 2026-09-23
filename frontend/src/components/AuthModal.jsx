@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { loginWithFirebase, registerWithFirebase, signOut, auth } from '../firebase';
 
 export function AuthModal({ isOpen, onClose, currentUser, onLoginSuccess, onLogout }) {
   const [tab, setTab] = useState('login'); // 'login' | 'register'
@@ -36,12 +37,9 @@ export function AuthModal({ isOpen, onClose, currentUser, onLoginSuccess, onLogo
     setError(null);
     setIsLoading(true);
     try {
-      const res = await api.login(username, password);
-      if (res && res.access_token) {
-        localStorage.setItem('ku_traffic_token', res.access_token);
-        onLoginSuccess(res.user);
-        onClose();
-      }
+      const user = await loginWithFirebase(username, password);
+      onLoginSuccess(user);
+      onClose();
     } catch (err) {
       setError(err.message || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล');
     } finally {
@@ -54,18 +52,14 @@ export function AuthModal({ isOpen, onClose, currentUser, onLoginSuccess, onLogo
     setError(null);
     setIsLoading(true);
     try {
-      const res = await api.register({
+      const user = await registerWithFirebase({
         username,
         email,
         password,
         full_name: fullName,
-        role
       });
-      if (res && res.access_token) {
-        localStorage.setItem('ku_traffic_token', res.access_token);
-        onLoginSuccess(res.user);
-        onClose();
-      }
+      onLoginSuccess(user);
+      onClose();
     } catch (err) {
       setError(err.message || 'สมัครสมาชิกไม่สำเร็จ');
     } finally {
@@ -79,12 +73,9 @@ export function AuthModal({ isOpen, onClose, currentUser, onLoginSuccess, onLogo
     setError(null);
     setIsLoading(true);
     try {
-      const res = await api.login(acc.username, acc.password);
-      if (res && res.access_token) {
-        localStorage.setItem('ku_traffic_token', res.access_token);
-        onLoginSuccess(res.user);
-        onClose();
-      }
+      const user = await loginWithFirebase(acc.username, acc.password);
+      onLoginSuccess(user);
+      onClose();
     } catch (err) {
       setError(err.message || 'เข้าสู่ระบบด้วยบัญชีทดสอบไม่สำเร็จ');
     } finally {
@@ -184,8 +175,8 @@ export function AuthModal({ isOpen, onClose, currentUser, onLoginSuccess, onLogo
 
             <button
               type="button"
-              onClick={() => {
-                localStorage.removeItem('ku_traffic_token');
+              onClick={async () => {
+                await signOut(auth);
                 onLogout();
                 onClose();
               }}

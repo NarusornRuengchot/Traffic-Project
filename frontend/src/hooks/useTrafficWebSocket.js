@@ -40,9 +40,10 @@ export function useTrafficWebSocket() {
   const previewDebounceTimerRef = useRef(null);
 
   const connect = useCallback(() => {
+    const configuredWsUrl = import.meta.env.VITE_WS_URL;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.origin.includes(':5173') ? '127.0.0.1:8000' : window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/stream`;
+    const wsUrl = configuredWsUrl || `${protocol}//${host}/ws/stream`;
 
     // Strictly prevent duplicate WebSocket connections during React StrictMode mount
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {

@@ -13,6 +13,7 @@ import { AuthModal } from './components/AuthModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { useTrafficWebSocket } from './hooks/useTrafficWebSocket';
 import { api } from './services/api';
+import { auth, getCurrentUserProfile, onAuthStateChanged, signOut } from './firebase';
 
 export default function App() {
   const [theme, setTheme] = useState('dark');
@@ -23,22 +24,29 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const abortControllerRef = React.useRef(null);
 
-  // Auto-restore session from stored token
+  // Restore the Firebase session automatically after refresh.
   useEffect(() => {
-    const token = localStorage.getItem('ku_traffic_token');
-    if (token) {
-      api.getMe(token)
-        .then((res) => {
-          if (res && res.user) {
-            setCurrentUser(res.user);
-          } else {
-            localStorage.removeItem('ku_traffic_token');
-          }
-        })
-        .catch(() => {
-          localStorage.removeItem('ku_traffic_token');
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setCurrentUser(null);
+        return;
+      }
+
+      try {
+        setCurrentUser(await getCurrentUserProfile(firebaseUser));
+      } catch (error) {
+        console.error('Could not load Firebase user profile:', error);
+        setCurrentUser({
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          username: firebaseUser.email?.split('@')[0] || 'user',
+          email: firebaseUser.email || '',
+          role: 'user',
         });
-    }
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
   // Calibration and Stream Settings
@@ -299,7 +307,7 @@ export default function App() {
           setIsAuthOpen(false);
         }}
         onLogout={() => {
-          localStorage.removeItem('ku_traffic_token');
+          signOut(auth).catch((error) => console.error('Firebase logout failed:', error));
           setCurrentUser(null);
           setIsAuthOpen(false);
         }}

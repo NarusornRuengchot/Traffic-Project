@@ -10,6 +10,7 @@ import cv2
 
 from src.core.traffic_pipeline import TrafficPipeline
 from src.database.db_manager import db_manager
+from src.services.firebase_vehicle_logger import firebase_vehicle_logger
 
 class StreamWorker:
     """
@@ -271,6 +272,15 @@ class StreamWorker:
                     except Exception as db_err:
                         print(f"⚠️ DB log_events error: {db_err}")
 
+                    for event in new_events:
+                        try:
+                            firebase_vehicle_logger.log_crossing(
+                                event,
+                                session_id=os.path.basename(str(self.video_path or "live")),
+                            )
+                        except Exception as firebase_err:
+                            print(f"⚠️ Firebase vehicle log error: {firebase_err}")
+
                 # Persist traffic incidents to SQLite database
                 new_incidents = telemetry.get("new_incidents")
                 if new_incidents:
@@ -279,19 +289,33 @@ class StreamWorker:
                     except Exception as db_err:
                         print(f"⚠️ DB log_incidents error: {db_err}")
 
+                    for incident in new_incidents:
+                        try:
+                            firebase_vehicle_logger.log_incident(
+                                incident,
+                                session_id=os.path.basename(str(self.video_path or "live")),
+                            )
+                        except Exception as firebase_err:
+                            print(f"⚠️ Firebase incident log error: {firebase_err}")
+
                 # Periodic density snapshot (every ~5 seconds = 150 frames)
                 if curr_idx % 150 == 0:
+                    session_id = os.path.basename(str(self.video_path or "live"))
+                    snapshot = {
+                        "active_vehicles": telemetry.get("active_vehicles", 0),
+                        "density_score": telemetry.get("density_score", 0.0),
+                        "traffic_level": telemetry.get("traffic_level_th", "คล่องตัว"),
+                        "stall_ratio": telemetry.get("stall_ratio", 0.0),
+                        "avg_speed_kmh": telemetry.get("avg_speed_kmh", 0.0),
+                    }
                     try:
-                        db_manager.log_snapshot(
-                            active_vehicles=telemetry.get("active_vehicles", 0),
-                            density_score=telemetry.get("density_score", 0.0),
-                            traffic_level=telemetry.get("traffic_level_th", "คล่องตัว"),
-                            stall_ratio=telemetry.get("stall_ratio", 0.0),
-                            avg_speed_kmh=telemetry.get("avg_speed_kmh", 0.0),
-                            session_id=os.path.basename(str(self.video_path or "live"))
-                        )
+                        db_manager.log_snapshot(**snapshot, session_id=session_id)
                     except Exception as db_err:
                         pass
+                    try:
+                        firebase_vehicle_logger.log_snapshot(snapshot, session_id=session_id)
+                    except Exception as firebase_err:
+                        print(f"⚠️ Firebase snapshot log error: {firebase_err}")
             except Exception as err:
                 print(f"⚠️ Error during frame inference: {err}")
                 time.sleep(0.03)
