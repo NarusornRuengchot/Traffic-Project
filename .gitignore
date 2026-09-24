@@ -22,6 +22,9 @@ venv/
 env/
 v/
 .env
+serviceAccountKey.json
+*serviceAccountKey*.json
+*credentials*.json
 
 # SQLite journal/wal files
 *.db-wal
