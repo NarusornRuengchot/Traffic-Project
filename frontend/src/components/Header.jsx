@@ -13,29 +13,30 @@ export function Header({
   onOpenAuth
 }) {
   return (
-    <header className="glass-card" style={{ padding: '16px 24px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-        <div style={{
-          width: '44px',
-          height: '44px',
+    <header className="glass-card main-header">
+      <div className="header-brand" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div className="header-logo" style={{
+          width: '42px',
+          height: '42px',
           borderRadius: '12px',
           background: 'linear-gradient(135deg, #2563eb, #06b6d4)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontSize: '22px',
-          boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
+          fontSize: '20px',
+          boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+          flexShrink: 0
         }}>
           🚗
         </div>
         <div>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: '800', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h1 className="header-title" style={{ fontSize: '1.2rem', fontWeight: '800', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
             KU SRC Smart Traffic
-            <span style={{ fontSize: '0.75rem', fontWeight: '600', padding: '2px 8px', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
-              v2.4 Business & Mobile
+            <span className="header-badge" style={{ fontSize: '0.72rem', fontWeight: '700', padding: '2px 8px', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+              v2.4 Mobile
             </span>
           </h1>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          <p className="header-sub" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
             Real-time Vehicle AI, Business Footfall Analytics & Multi-Branch CCTV
           </p>
         </div>

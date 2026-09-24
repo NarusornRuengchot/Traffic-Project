@@ -21,6 +21,7 @@ export default function App() {
   const [restCalibrationPreview, setRestCalibrationPreview] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [mobileTabSection, setMobileTabSection] = useState('feed'); // 'feed' | 'controls' | 'analytics'
   const abortControllerRef = React.useRef(null);
 
   // Auto-restore session from stored token
@@ -199,10 +200,35 @@ export default function App() {
           {/* KPI Metric Summary Cards */}
           <MetricCards telemetry={telemetry} />
 
+          {/* Mobile Tab Section Segmented Selector (Mobile Only) */}
+          <div className="mobile-section-switcher">
+            <button
+              type="button"
+              className={`mobile-switch-pill ${mobileTabSection === 'feed' ? 'active' : ''}`}
+              onClick={() => setMobileTabSection('feed')}
+            >
+              📹 ภาพสตรีมสด
+            </button>
+            <button
+              type="button"
+              className={`mobile-switch-pill ${mobileTabSection === 'controls' ? 'active' : ''}`}
+              onClick={() => setMobileTabSection('controls')}
+            >
+              ⚙️ ตั้งค่า & กล้อง
+            </button>
+            <button
+              type="button"
+              className={`mobile-switch-pill ${mobileTabSection === 'analytics' ? 'active' : ''}`}
+              onClick={() => setMobileTabSection('analytics')}
+            >
+              📊 กราฟ & สถิติ
+            </button>
+          </div>
+
           {/* Main Grid: Left Control Panel, Center Video, Right Analytics */}
           <div className="dashboard-grid">
             {/* Left Column: Control Panel & Settings */}
-            <div>
+            <div className={`dashboard-col-controls ${mobileTabSection === 'controls' ? 'active-mobile-view' : ''}`}>
               <ControlPanel
                 config={config}
                 onChangeConfig={handleConfigChange}
@@ -219,7 +245,7 @@ export default function App() {
             </div>
 
             {/* Center Column: Video Stream & Event Logs */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className={`dashboard-col-video ${mobileTabSection === 'feed' ? 'active-mobile-view' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {/* Connection Error Banner */}
               {streamError && (
                 <div style={{
@@ -269,7 +295,7 @@ export default function App() {
             </div>
 
             {/* Right Column: Breakdown & Real-time Charts */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className={`dashboard-col-analytics ${mobileTabSection === 'analytics' ? 'active-mobile-view' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <VehicleBreakdown
                 classCounts={telemetry.class_counts || {}}
                 totalCount={telemetry.total_count || 0}
