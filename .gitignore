@@ -34,3 +34,9 @@ serviceAccountKey.json
 # OS temporary files
 .DS_Store
 Thumbs.db
+
+# Firebase & Cloud Service Account Credentials
+*firebase*.json
+firebase-service-account.json
+*serviceAccountKey*.json
+
