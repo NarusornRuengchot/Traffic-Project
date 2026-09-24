@@ -2,7 +2,7 @@ import React from 'react';
 
 export function MobileBottomNav({ activeTab, onSelectTab, onOpenAuth, currentUser }) {
   const navItems = [
-    { id: 'live', label: 'สด', icon: '📹' },
+    { id: 'live', label: 'กล้องสด', icon: '📹', badge: 'LIVE' },
     { id: 'business', label: 'ธุรกิจ', icon: '🏢' },
     { id: 'benchmark', label: 'เทียบ AI', icon: '⚖️' },
     { id: 'reports', label: 'สถิติ', icon: '📊' },
@@ -18,24 +18,41 @@ export function MobileBottomNav({ activeTab, onSelectTab, onOpenAuth, currentUse
             type="button"
             onClick={() => onSelectTab(item.id)}
             className={`mobile-nav-btn ${isActive ? 'active' : ''}`}
+            aria-label={item.label}
           >
-            <span style={{ fontSize: '1.25rem', marginBottom: '2px' }}>{item.icon}</span>
-            <span style={{ fontSize: '0.68rem', fontWeight: isActive ? '800' : '600' }}>{item.label}</span>
+            <div className="mobile-icon-wrapper">
+              <span className="mobile-nav-icon">{item.icon}</span>
+              {item.badge && item.id === 'live' && (
+                <span className="mobile-nav-live-dot" />
+              )}
+            </div>
+            <span className="mobile-nav-label">{item.label}</span>
+            {isActive && <span className="mobile-active-pill" />}
           </button>
         );
       })}
 
-      {/* Account / Login Tab */}
+      {/* Account / Profile Button */}
       <button
         type="button"
         onClick={onOpenAuth}
         className="mobile-nav-btn"
+        aria-label="จัดการบัญชี"
       >
-        <span style={{ fontSize: '1.25rem', marginBottom: '2px' }}>
-          {currentUser ? '👤' : '🔐'}
-        </span>
-        <span style={{ fontSize: '0.68rem', fontWeight: '700', color: currentUser ? '#10b981' : 'var(--text-secondary)' }}>
-          {currentUser ? (currentUser.username.substring(0, 6)) : 'ล็อกอิน'}
+        <div className="mobile-icon-wrapper">
+          <span className="mobile-nav-icon">
+            {currentUser ? (currentUser.role === 'admin' ? '👑' : '👤') : '🔐'}
+          </span>
+          {currentUser && <span className="mobile-user-online-dot" />}
+        </div>
+        <span
+          className="mobile-nav-label"
+          style={{
+            color: currentUser ? 'var(--accent-primary)' : 'inherit',
+            fontWeight: currentUser ? '700' : '600'
+          }}
+        >
+          {currentUser ? (currentUser.username.length > 5 ? `${currentUser.username.slice(0, 5)}..` : currentUser.username) : 'บัญชี'}
         </span>
       </button>
     </nav>

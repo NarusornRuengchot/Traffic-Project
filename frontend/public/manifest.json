@@ -1,0 +1,18 @@
+{
+  "name": "KU SRC Smart Traffic App",
+  "short_name": "KUTraffic",
+  "description": "Real-time Vehicle AI, CCTV Streaming & Smart City Business Analytics",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#111827",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
