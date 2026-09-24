@@ -12,7 +12,8 @@ export function ControlPanel({
   cctvTestResult,
   setCctvTestResult,
   wsResources,
-  onSwitchModel
+  onSwitchModel,
+  onOpenBenchmark
 }) {
   const [videos, setVideos] = useState([]);
   const [models, setModels] = useState([]);
@@ -251,6 +252,33 @@ export function ControlPanel({
                   📹 Dahua / IMOU
                 </button>
               </div>
+
+              {onOpenBenchmark && (
+                <button
+                  type="button"
+                  onClick={() => onOpenBenchmark(config.video_path)}
+                  style={{
+                    marginTop: '12px',
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(59, 130, 246, 0.4)',
+                    background: 'rgba(37, 99, 235, 0.12)',
+                    color: '#60a5fa',
+                    fontSize: '0.78rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>⚖️</span>
+                  <span>เปรียบเทียบความแม่นยำ AI บน CCTV นี้ (Benchmark)</span>
+                </button>
+              )}
             </div>
 
             {/* Collapsible CCTV Help */}

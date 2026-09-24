@@ -26,6 +26,7 @@ frontend/.oxlintrc.json
 *.mp4
 *.avi
 runs/
+ml/
 dataset/
 dataset_yolo/
 vehicles-coco-2/

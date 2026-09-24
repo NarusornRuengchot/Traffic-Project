@@ -1,7 +1,6 @@
 import React from 'react';
 
 export function MetricCards({ telemetry }) {
-  const incidentCount = telemetry.active_incidents ? telemetry.active_incidents.length : 0;
   const avgSpeed = telemetry.avg_speed_kmh !== undefined ? telemetry.avg_speed_kmh : 0.0;
 
   const cards = [
@@ -46,12 +45,12 @@ export function MetricCards({ telemetry }) {
       bgGlow: `${telemetry.traffic_level_color || '#10b981'}25`
     },
     {
-      title: 'Incidents (เหตุการณ์ผิดปกติ)',
-      value: `${incidentCount} จุด`,
-      subValue: incidentCount > 0 ? '⚠️ ตรวจพบรถย้อนศร/จอดแช่' : '🛡️ สภาพการเดินรถปกติ',
-      icon: incidentCount > 0 ? '🚨' : '🛡️',
-      color: incidentCount > 0 ? '#ef4444' : '#10b981',
-      bgGlow: incidentCount > 0 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.15)'
+      title: 'Active on Screen (รถบนจอ)',
+      value: `${telemetry.active_vehicles ?? 0} คัน`,
+      subValue: 'กำลังตรวจจับแบบ Real-time',
+      icon: '🎯',
+      color: '#8b5cf6',
+      bgGlow: 'rgba(139, 92, 246, 0.15)'
     }
   ];
 
