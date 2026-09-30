@@ -115,6 +115,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA foreign_keys=ON;")
             
             # 1. Individual vehicle crossing event table
             conn.execute("""
@@ -192,7 +193,8 @@ class DatabaseManager:
                     role TEXT DEFAULT 'user', -- admin, user
                     business_id INTEGER,
                     is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(business_id) REFERENCES businesses(id) ON DELETE SET NULL
                 );
             """)
 
@@ -223,7 +225,8 @@ class DatabaseManager:
                     camera_type TEXT DEFAULT 'entrance', -- entrance, exit, parking, lane
                     location_note TEXT,
                     is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(business_id) REFERENCES businesses(id) ON DELETE SET NULL
                 );
             """)
 
@@ -242,6 +245,7 @@ class DatabaseManager:
                     bus_count INTEGER DEFAULT 0,
                     estimated_footfall INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(business_id) REFERENCES businesses(id) ON DELETE CASCADE,
                     UNIQUE(business_id, date)
                 );
             """)
